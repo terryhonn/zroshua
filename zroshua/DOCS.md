@@ -118,6 +118,10 @@ the run is skipped with a journal reason).
   above 30 °C → +30 %) driven by the forecast max, yesterday's local sensor max, or a
   combination (max / average). Schedule planning reserves the worst-case boost so extended
   runs can never violate group rules.
+- **Auto-allow gate** (per zone) — sticky switch that blocks only automatic runs when off
+  (schedules, soil, heat). Manual *Water now* still works. Exposed to Home Assistant as
+  `switch.<zone>_auto_allow` over MQTT so automations can disable a zone after measured
+  rain without a timed pause. Optional extra HA entity on the zone must also be ON when set.
 - **Pause** at three levels — global (all watering), per group and per zone — for a chosen
   number of hours, with automatic resume. A pause skips only automatic runs (schedules, soil
   and weather triggers); manual runs always work. Use a group/zone pause to skip the next run

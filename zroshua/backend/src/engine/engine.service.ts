@@ -161,6 +161,22 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
   private source(id: string | null | undefined) { return this.sources.find((s) => s.id === id); }
 
   /**
+   * Whether automatic watering is allowed for this zone right now.
+   * Manual runs never consult this. Unavailable autoAllowEntity never blocks
+   * (same "don't leave the garden dry" rule as other sensors).
+   */
+  autoAllowed(zone: Zone): { ok: boolean; reason?: string } {
+    if (zone.autoAllow === false) {
+      return { ok: false, reason: 'auto allow switch is off' };
+    }
+    const entity = zone.autoAllowEntity;
+    if (entity && this.ha.available(entity) && !this.ha.isOn(entity)) {
+      return { ok: false, reason: `auto disabled by ${entity}` };
+    }
+    return { ok: true };
+  }
+
+  /**
    * Group pairs ("a|b", symmetric) that must never overlap because their water
    * sources are marked exclusive — one source-level rule instead of a mutex per
    * group pair; new groups inherit it automatically.
@@ -534,6 +550,8 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
       return this.skip(groupId, zone.id, 'group_paused', 'group is paused');
     if (zone.snoozeUntil && Number(zone.snoozeUntil) > now)
       return this.skip(groupId, zone.id, 'zone_paused', 'zone is paused');
+    const gate = this.autoAllowed(zone);
+    if (!gate.ok) return this.skip(groupId, zone.id, 'auto_disabled', gate.reason ?? 'auto allow is off');
     const settings = await this.config.getSettings();
     if ((await this.rainIsWet(settings)) && !zone.ignore?.rain_sensor)
       return this.skip(groupId, zone.id, 'rain_sensor', 'rain sensor is wet (or in dry-out window)');
@@ -700,6 +718,13 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
         continue;
       }
       if (!manual) {
+        const gate = this.autoAllowed(zone);
+        if (!gate.ok) {
+          await this.skip(group.id, zone.id, 'auto_disabled', gate.reason ?? 'auto allow is off');
+          continue;
+        }
+      }
+      if (!manual) {
         const zsrc = this.source(zone.sourceId);
         const lvl = zsrc?.capacityL && zsrc.blockBelowPct != null ? this.sourceLevelL(zsrc.id) : null;
         if (zsrc?.capacityL && zsrc.blockBelowPct != null && lvl !== null && (lvl / zsrc.capacityL) * 100 < zsrc.blockBelowPct) {
@@ -838,6 +863,20 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
         this.broadcastState();
         continue;
       }
+      // Auto-allow can flip OFF after enqueue (e.g. overnight rain automation) — skip, don't wait.
+      if (!q.manual) {
+        const z = this.zone(q.zoneId);
+        if (z) {
+          const gate = this.autoAllowed(z);
+          if (!gate.ok) {
+            this.queue = this.queue.filter((x) => x.key !== q.key);
+            await this.skip(q.groupId, q.zoneId, 'auto_disabled', gate.reason ?? 'auto allow is off');
+            await this.settleEmptyGroupRuns();
+            this.broadcastState();
+            continue;
+          }
+        }
+      }
       const check = this.canStart(q, now);
       q.waitReason = check.ok ? undefined : check.reason;
       if (!check.ok) {
@@ -885,6 +924,8 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
     }
 
     if (!q.manual) {
+      const gate = this.autoAllowed(zone);
+      if (!gate.ok) return { ok: false, reason: gate.reason };
       // mutex rules (active + starting)
       for (const rule of this.rules.filter((r) => r.type === 'mutex')) {
         if (!q.groupId || !rule.groups.includes(q.groupId)) continue;
@@ -1709,6 +1750,17 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
     if (zones.length && zones.every((z) => z.snoozeUntil && Number(z.snoozeUntil) > ts))
       reasons.push('all zones paused');
 
+    // sticky auto-allow gate (MQTT switch / optional HA entity) — sure skip if currently off
+    if (zones.length) {
+      const blocked = zones.filter((z) => !this.autoAllowed(z).ok);
+      if (blocked.length === zones.length) {
+        const r = this.autoAllowed(blocked[0]).reason ?? 'auto allow is off';
+        reasons.push(blocked.length === 1 ? r : `all zones auto-disabled (${r})`);
+      } else if (blocked.length) {
+        maybe.push(`${blocked.map((z) => z.name).join(', ')} auto-disabled`);
+      }
+    }
+
     // rain sensor: currently wet, or inside the dry-out window
     if (settings.rainSensor.enabled && !zones.every((z) => z.ignore?.rain_sensor)) {
       const wetNow = settings.rainSensor.entities.filter((e) => this.ha.isOn(e)).length >= Math.max(1, settings.rainSensor.quorum);
@@ -2172,6 +2224,22 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
     const z = this.zone(zoneId);
     if (z) z.snoozeUntil = until;
     await this.journal.add('info', { zoneId, code: 'zone_pause', detail: hours > 0 ? `zone paused for ${this.pausePhrase(hours)}` : 'zone pause cleared' });
+    this.broadcastState();
+  }
+
+  /**
+   * Sticky auto-allow for schedules/soil/heat. When false, automatic runs are skipped
+   * with journal code `auto_disabled`. Manual "water now" still works.
+   */
+  async setZoneAutoAllow(zoneId: string, allow: boolean) {
+    await this.zonesRepo.update({ id: zoneId }, { autoAllow: allow });
+    const z = this.zone(zoneId);
+    if (z) z.autoAllow = allow;
+    await this.journal.add('info', {
+      zoneId,
+      code: allow ? 'auto_allow_on' : 'auto_allow_off',
+      detail: allow ? 'automatic watering re-enabled' : 'automatic watering disabled by auto-allow switch',
+    });
     this.broadcastState();
   }
 

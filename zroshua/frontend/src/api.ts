@@ -48,6 +48,10 @@ export interface Zone {
   enabled: boolean;
   orderIndex: number;
   snoozeUntil: number | null;
+  /** When false, schedules/soil/heat skip this zone (manual water-now still works). HA MQTT switch. */
+  autoAllow: boolean;
+  /** Optional HA entity that must be ON for automatic runs (input_boolean / switch / binary_sensor). */
+  autoAllowEntity: string | null;
 }
 
 export interface ScheduleStart {

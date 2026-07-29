@@ -67,7 +67,13 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
       this.status.detail = 'connected';
       this.log.log(`Connected to broker ${url}`);
       this.client!.publish(AVAIL_TOPIC, 'online', { retain: true });
-      this.client!.subscribe(['zroshua/+/+/set', 'zroshua/+/set', 'zroshua/command', `${DISCOVERY_PREFIX}/status`]);
+      this.client!.subscribe([
+        'zroshua/+/+/set',
+        'zroshua/+/set',
+        'zroshua/zone/+/auto/set',
+        'zroshua/command',
+        `${DISCOVERY_PREFIX}/status`,
+      ]);
       void this.publishDiscovery();
       void this.publishStates();
     });
@@ -144,6 +150,21 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
           icon: 'mdi:sprinkler-variant',
           command_topic: `zroshua/zone/${z.id}/set`,
           state_topic: `zroshua/zone/${z.id}/state`,
+        },
+        true,
+      );
+      // Sticky "allow automatic schedules" gate — OFF skips scheduled/soil/heat runs (manual still works).
+      const aid = `${sid}_auto`;
+      current.add(`switch:${aid}`);
+      this.pub(
+        `${DISCOVERY_PREFIX}/switch/${aid}/config`,
+        {
+          ...common,
+          name: `${z.name} auto allow`,
+          unique_id: aid,
+          icon: 'mdi:calendar-check',
+          command_topic: `zroshua/zone/${z.id}/auto/set`,
+          state_topic: `zroshua/zone/${z.id}/auto/state`,
         },
         true,
       );
@@ -266,6 +287,7 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
 
     for (const z of zones) {
       this.pub(`zroshua/zone/${z.id}/state`, activeIds.has(z.id) ? 'ON' : 'OFF');
+      this.pub(`zroshua/zone/${z.id}/auto/state`, z.autoAllow !== false ? 'ON' : 'OFF');
       const next = await this.engine.nextRunTs(z.id);
       this.pub(`zroshua/zone/${z.id}/next`, next ? new Date(next).toISOString() : 'None');
     }
@@ -361,6 +383,7 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
           name: z.name,
           type: z.type,
           enabled: z.enabled,
+          autoAllow: z.autoAllow !== false,
           running: activeZoneIds.has(z.id),
           queued: queueZoneIds.has(z.id),
           fault: snapshot.faults.includes(z.id),
@@ -399,6 +422,12 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
       if (topic === `${DISCOVERY_PREFIX}/status` && payload === 'online') {
         // HA restarted — re-announce everything
         await this.publishDiscovery();
+        await this.publishStates();
+        return;
+      }
+      const zoneAuto = /^zroshua\/zone\/(.+)\/auto\/set$/.exec(topic);
+      if (zoneAuto) {
+        await this.engine.setZoneAutoAllow(zoneAuto[1], payload === 'ON');
         await this.publishStates();
         return;
       }
@@ -447,6 +476,8 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
         return void (await this.engine.setGroupPause(cmd.groupId, Number(cmd.hours) || 0));
       case 'pause_zone':
         return void (await this.engine.setZonePause(cmd.zoneId, Number(cmd.hours) || 0));
+      case 'auto_allow_zone':
+        return void (await this.engine.setZoneAutoAllow(cmd.zoneId, cmd.allow !== false));
       default:
         this.log.warn(`unknown command action: ${cmd?.action}`);
     }

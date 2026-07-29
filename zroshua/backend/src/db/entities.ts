@@ -27,6 +27,17 @@ export class Zone {
   @Column({ default: 0 }) orderIndex: number;
   // temporary pause: skip automatic runs until this timestamp (ms). Manual runs ignore it.
   @Column({ type: 'bigint', nullable: true }) snoozeUntil: number | null;
+  /**
+   * Sticky auto-allow gate for schedules / soil / heat triggers (manual runs ignore it).
+   * Exposed to Home Assistant as a dedicated MQTT switch so automations can turn a zone
+   * off after heavy rain without disabling the zone or pausing on a timer.
+   */
+  @Column({ default: true }) autoAllow: boolean;
+  /**
+   * Optional extra HA entity (input_boolean / switch / binary_sensor) that must be ON
+   * for automatic runs. Missing or unavailable data does not block watering.
+   */
+  @Column({ type: 'varchar', nullable: true }) autoAllowEntity: string | null;
 }
 
 export type GroupMode = 'sequential' | 'parallel' | 'parallel_limit';

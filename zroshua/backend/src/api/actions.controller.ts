@@ -121,6 +121,13 @@ export class ActionsController {
     return { ok: true };
   }
 
+  /** Sticky auto-allow for schedules (manual runs ignore). HA automations can flip this via MQTT switch. */
+  @Post('zones/:id/auto-allow')
+  async autoAllowZone(@Param('id') id: string, @Body() body: { allow: boolean }) {
+    await this.engine.setZoneAutoAllow(id, body?.allow !== false);
+    return { ok: true, allow: body?.allow !== false };
+  }
+
   @Post('pause')
   pause(@Body() body: { paused: boolean }) {
     this.engine.paused = !!body?.paused;

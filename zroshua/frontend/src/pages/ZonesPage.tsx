@@ -20,7 +20,7 @@ import { notifications } from '@mantine/notifications';
 import { api, EngineState, Settings, WaterSource, Zone } from '../api';
 import { useResource, fmtDur, fmtAgo } from '../hooks';
 import { t } from '../i18n';
-import { EntityMultiSelect, SliderInput, PauseControl } from '../components/common';
+import { EntityMultiSelect, EntitySelect, SliderInput, PauseControl } from '../components/common';
 import ScheduleEditor, { emptySchedule } from '../components/ScheduleEditor';
 import { BusyBand, overlapsConflict, toMin } from '../components/TimeSlotPicker';
 import { HintLabel, HintTitle } from '../components/Hint';
@@ -40,6 +40,8 @@ const emptyZone: Partial<Zone> = {
   soilSensor: null,
   schedules: [],
   enabled: true,
+  autoAllow: true,
+  autoAllowEntity: null,
 };
 
 export default function ZonesPage({ state }: { state: EngineState | null }) {
@@ -139,6 +141,11 @@ export default function ZonesPage({ state }: { state: EngineState | null }) {
                 {!!z.snoozeUntil && z.snoozeUntil > Date.now() && (
                   <Badge color="orange" variant="light">
                     {t('paused')}
+                  </Badge>
+                )}
+                {z.autoAllow === false && (
+                  <Badge color="gray" variant="light" title={t('Automatic schedules are blocked for this zone')}>
+                    {t('auto off')}
                   </Badge>
                 )}
                 {faults.has(z.id) && (
@@ -346,6 +353,17 @@ export default function ZonesPage({ state }: { state: EngineState | null }) {
                 onDelete={() => setEditing({ ...editing, schedules: (editing.schedules ?? []).filter((_, j) => j !== i) })}
               />
             ))}
+            <Switch
+              label={<HintLabel label={t('Allow automatic watering')} hint={t('When off, schedules / soil / heat skip this zone. Manual "Water now" still works. Also exposed to Home Assistant as a switch for automations (e.g. turn off after heavy rain).')} />}
+              checked={editing.autoAllow !== false}
+              onChange={(e) => setEditing({ ...editing, autoAllow: e.currentTarget.checked })}
+            />
+            <EntitySelect
+              label={<HintLabel label={t('Extra auto-allow entity (optional)')} hint={t('If set, this HA switch / input_boolean / binary_sensor must also be ON for automatic runs. Unavailable = allow.')} />}
+              value={editing.autoAllowEntity ?? null}
+              onChange={(v) => setEditing({ ...editing, autoAllowEntity: v })}
+              domains={['input_boolean', 'switch', 'binary_sensor']}
+            />
             <Group>
               <Switch
                 label={t('Ignore rain sensor')}
