@@ -40,9 +40,12 @@ export default function GroupsPage() {
   const [ruleGroups, setRuleGroups] = useState<string[]>([]);
   const [ruleBefore, setRuleBefore] = useState<string | null>(null);
   const [ruleAfter, setRuleAfter] = useState<string | null>(null);
+  /** When on, hide disabled groups on the list and disabled schedules in the editor. Default off. */
+  const [hideDisabled, setHideDisabled] = useState(false);
 
   const notifyErr = (e: any) => notifications.show({ message: e.message, color: 'red' });
   const groupOpts = (groups ?? []).map((g) => ({ value: g.id, label: g.name }));
+  const visibleGroups = (groups ?? []).filter((g) => !hideDisabled || g.enabled);
 
   const openEditor = (g: Partial<ZGroup>) => {
     setEditing({ ...g });
@@ -115,14 +118,21 @@ export default function GroupsPage() {
 
   return (
     <Stack>
-      <Group justify="space-between">
+      <Group justify="space-between" wrap="wrap">
         <Title order={3}>{t('Groups & schedules')}</Title>
-        <Button onClick={() => openEditor({ name: '', zoneIds: [], mode: 'sequential', parallelLimit: 2, interZoneDelayS: 0, multiplierPct: 100, priority: 0, schedules: [], enabled: true })}>
-          {t('Add group')}
-        </Button>
+        <Group gap="md">
+          <Switch
+            label={t('Hide Disabled')}
+            checked={hideDisabled}
+            onChange={(e) => setHideDisabled(e.currentTarget.checked)}
+          />
+          <Button onClick={() => openEditor({ name: '', zoneIds: [], mode: 'sequential', parallelLimit: 2, interZoneDelayS: 0, multiplierPct: 100, priority: 0, schedules: [], enabled: true })}>
+            {t('Add group')}
+          </Button>
+        </Group>
       </Group>
 
-      {(groups ?? []).map((g) => (
+      {visibleGroups.map((g) => (
         <Card key={g.id} withBorder>
           <Group justify="space-between">
             <Group gap="xs">
@@ -269,7 +279,10 @@ export default function GroupsPage() {
                 {t('Add schedule')}
               </Button>
             </Group>
-            {(editing.schedules ?? []).map((s, i) => (
+            {(editing.schedules ?? [])
+              .map((s, i) => ({ s, i }))
+              .filter(({ s }) => !hideDisabled || s.enabled)
+              .map(({ s, i }) => (
               <ScheduleEditor
                 key={s.id}
                 schedule={s}
