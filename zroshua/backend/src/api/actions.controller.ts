@@ -4,6 +4,7 @@ import { ConfigService } from '../config/config.service';
 import { WeatherService } from '../weather/weather.service';
 import { JournalService } from '../journal/journal.service';
 import { MqttService } from '../mqtt/mqtt.service';
+import { ADDON_VERSION } from '../version';
 
 @Controller('api')
 export class ActionsController {
@@ -47,7 +48,12 @@ export class ActionsController {
 
   @Get('health')
   health() {
-    return { ok: true, ts: Date.now() };
+    return { ok: true, version: ADDON_VERSION, ts: Date.now() };
+  }
+
+  @Get('version')
+  version() {
+    return { version: ADDON_VERSION };
   }
 
   @Get('journal')

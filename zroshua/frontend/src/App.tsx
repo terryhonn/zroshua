@@ -14,7 +14,7 @@ import {
   IconCategory,
   IconNotes,
 } from '@tabler/icons-react';
-import { useEngineState } from './hooks';
+import { useEngineState, useResource } from './hooks';
 import { t } from './i18n';
 import DashboardPage from './pages/DashboardPage';
 import ZonesPage from './pages/ZonesPage';
@@ -77,6 +77,7 @@ export default function App() {
   const [opened, { toggle, close }] = useDisclosure();
   const [page, setPage] = useState<PageKey>(initialPage);
   const { state, journalTick } = useEngineState();
+  const { data: health } = useResource<{ version?: string }>('/health');
 
   const goto = (k: PageKey) => {
     try { localStorage.setItem(STORE_KEY, k); } catch { /* private mode */ }
@@ -100,6 +101,11 @@ export default function App() {
             <Text fw={750} size="lg" style={{ letterSpacing: '-0.01em' }}>
               Zroshua
             </Text>
+            {health?.version && (
+              <Badge variant="outline" color="gray" size="sm" title={t('Add-on version')}>
+                v{health.version}
+              </Badge>
+            )}
           </Group>
           <Group gap="xs" wrap="nowrap">
             {state && !state.haConnected && (

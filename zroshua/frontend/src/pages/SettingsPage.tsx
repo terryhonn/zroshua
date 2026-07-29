@@ -61,6 +61,7 @@ function MqttStatusBanner() {
 export default function SettingsPage() {
   const { data: settings, reload } = useResource<Settings>('/settings');
   const { data: groups } = useResource<ZGroup[]>('/groups');
+  const { data: health } = useResource<{ ok: boolean; version?: string }>('/health');
   const [s, setS] = useState<Settings | null>(null);
 
   useEffect(() => {
@@ -123,7 +124,14 @@ export default function SettingsPage() {
 
   return (
     <Stack>
-      <Title order={3}>{t('Settings')}</Title>
+      <Group justify="space-between" align="baseline" wrap="wrap">
+        <Title order={3}>{t('Settings')}</Title>
+        {health?.version && (
+          <Text size="sm" c="dimmed" title={t('Add-on version from /api/health')}>
+            {t('Version {version}', { version: health.version })}
+          </Text>
+        )}
+      </Group>
 
       <MqttStatusBanner />
 

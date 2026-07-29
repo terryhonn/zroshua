@@ -6,6 +6,7 @@ import { Run, Zone } from '../db/entities';
 import { ConfigService } from '../config/config.service';
 import { EngineService } from '../engine/engine.service';
 import { env } from '../env';
+import { ADDON_VERSION } from '../version';
 
 const AVAIL_TOPIC = 'zroshua/status';
 const DISCOVERY_PREFIX = 'homeassistant';
@@ -123,7 +124,7 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
       name: 'Zroshua',
       manufacturer: 'Zroshua',
       model: 'Irrigation add-on',
-      sw_version: '0.1.0',
+      sw_version: ADDON_VERSION,
     };
   }
 
