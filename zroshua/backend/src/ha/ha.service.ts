@@ -104,6 +104,32 @@ export class HaService extends EventEmitter implements OnModuleInit {
     return Number.isFinite(n) ? n : null;
   }
 
+  /**
+   * Temperature of a sensor/weather entity converted to °C.
+   * Uses `unit_of_measurement` / `temperature_unit` so °F HA instances compare
+   * correctly against thresholds stored in Celsius.
+   */
+  temperatureC(entityId: string): number | null {
+    const st = this.states.get(entityId);
+    if (!st) return null;
+    const raw =
+      st.entity_id.startsWith('weather.') && st.attributes?.temperature != null
+        ? Number(st.attributes.temperature)
+        : Number(st.state);
+    if (!Number.isFinite(raw)) return null;
+    const unit = st.attributes?.unit_of_measurement ?? st.attributes?.temperature_unit ?? null;
+    const u = String(unit ?? '').toLowerCase();
+    if (u.includes('f')) return ((raw - 32) * 5) / 9;
+    return raw;
+  }
+
+  /** Unit string for a weather entity (°C / °F), if HA exposes one. */
+  temperatureUnit(entityId: string): string | null {
+    const st = this.states.get(entityId);
+    if (!st) return null;
+    return (st.attributes?.temperature_unit ?? st.attributes?.unit_of_measurement ?? null) as string | null;
+  }
+
   available(entityId: string): boolean {
     const s = this.states.get(entityId)?.state;
     return s !== undefined && s !== 'unavailable' && s !== 'unknown';

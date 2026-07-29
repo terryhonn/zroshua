@@ -1,8 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '../config/config.service';
 import { HaService } from '../ha/ha.service';
+import { formatTempC, haReadingToC } from '../units/temp';
 
 export interface DayWeather {
+  /** Always Celsius after normalization from HA. */
   tempMaxC: number | null;
   precipitationProbability: number | null;
   precipitationMm: number | null;
@@ -20,6 +22,9 @@ export interface WeatherDecision {
  * Weather triggers + temperature scaling. Forecast comes from the HA weather
  * entity (location follows the HA instance); "yesterday actual" comes from a
  * local temperature sensor whose daily max we track ourselves.
+ *
+ * All temperatures are normalized to °C for comparisons. Journal/skip reasons
+ * are formatted with the user's `tempUnit` preference (°C or °F).
  */
 @Injectable()
 export class WeatherService {
@@ -43,9 +48,13 @@ export class WeatherService {
       return this.forecastCache.days;
     const entity = await this.pickWeatherEntity();
     if (!entity) return [];
+    const unit = this.ha.temperatureUnit(entity);
     const raw = await this.ha.getForecast(entity);
     const days: DayWeather[] = raw.map((f: any) => ({
-      tempMaxC: f.temperature ?? null,
+      tempMaxC:
+        f.temperature === null || f.temperature === undefined || !Number.isFinite(Number(f.temperature))
+          ? null
+          : haReadingToC(Number(f.temperature), unit),
       precipitationProbability: f.precipitation_probability ?? null,
       precipitationMm: f.precipitation ?? null,
       condition: f.condition ?? null,
@@ -57,10 +66,12 @@ export class WeatherService {
   async currentWeather() {
     const entity = await this.pickWeatherEntity();
     const state = entity ? this.ha.getState(entity) : null;
+    // Always expose Celsius so the UI can convert with the user's tempUnit.
+    const temperatureC = entity ? this.ha.temperatureC(entity) : null;
     return {
       entity,
       condition: state?.state ?? null,
-      temperature: state?.attributes?.temperature ?? null,
+      temperature: temperatureC,
       humidity: state?.attributes?.humidity ?? null,
       windSpeed: state?.attributes?.wind_speed ?? null,
       forecast: await this.getForecast().catch(() => []),
@@ -72,7 +83,7 @@ export class WeatherService {
     const s = await this.config.getSettings();
     const sensor = s.tempScale.yesterdaySensor;
     if (!sensor) return;
-    const value = this.ha.numeric(sensor);
+    const value = this.ha.temperatureC(sensor);
     if (value === null) return;
     const key = 'tempTrack';
     const today = new Date().toISOString().slice(0, 10);
@@ -96,6 +107,7 @@ export class WeatherService {
   /** Evaluate skip/scale decision for a group at schedule time. */
   async evaluate(groupId: string): Promise<WeatherDecision> {
     const s = await this.config.getSettings();
+    const unit = s.tempUnit ?? 'C';
     const detail: string[] = [];
     let multiplierPct = 100;
 
@@ -114,7 +126,12 @@ export class WeatherService {
         };
       }
       if (s.weatherTriggers.freezeC !== null && today.tempMaxC !== null && today.tempMaxC <= s.weatherTriggers.freezeC) {
-        return { skip: true, skipReason: `freeze protect (${today.tempMaxC}°C)`, multiplierPct: 0, detail };
+        return {
+          skip: true,
+          skipReason: `freeze protect (${formatTempC(today.tempMaxC, unit)})`,
+          multiplierPct: 0,
+          detail,
+        };
       }
     }
 
@@ -138,10 +155,15 @@ export class WeatherService {
             (step.aboveC !== undefined && t > step.aboveC);
           if (!hit) continue;
           if (step.action === 'skip')
-            return { skip: true, skipReason: `temperature ${t.toFixed(1)}°C below skip threshold`, multiplierPct: 0, detail };
+            return {
+              skip: true,
+              skipReason: `temperature ${formatTempC(t, unit)} below skip threshold`,
+              multiplierPct: 0,
+              detail,
+            };
           if (step.pct) {
             multiplierPct += step.pct;
-            detail.push(`temp ${t.toFixed(1)}°C → ${step.pct > 0 ? '+' : ''}${step.pct}%`);
+            detail.push(`temp ${formatTempC(t, unit)} → ${step.pct > 0 ? '+' : ''}${step.pct}%`);
           }
         }
       }

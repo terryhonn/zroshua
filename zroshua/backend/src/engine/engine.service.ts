@@ -9,6 +9,7 @@ import { NotifyService } from '../notify/notify.service';
 import { WeatherService } from '../weather/weather.service';
 import { EventsService } from '../events/events.service';
 import { inSeason, occurrences } from './planner';
+import { formatTempC } from '../units/temp';
 
 const TICK_MS = 1000;
 const CHECKBACK_WAIT_MS = 6000;
@@ -326,9 +327,11 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
 
   private async checkTempTriggers(now: number) {
     const settings = await this.config.getSettings();
+    const unit = settings.tempUnit ?? 'C';
     for (const t of settings.tempTriggers ?? []) {
       if (!t.enabled) continue;
-      const v = this.ha.numeric(t.sensor);
+      // Normalize HA °F sensors to °C so thresholds (always stored in °C) compare correctly.
+      const v = this.ha.temperatureC(t.sensor);
       if (v === null || v < t.aboveC) continue;
       const hhmm = new Date(now).toTimeString().slice(0, 5);
       if (t.windowFrom && hhmm < t.windowFrom) continue;
@@ -337,7 +340,10 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
       if (now - lastFired < t.cooldownHours * 3600_000) continue;
       if (!t.ignoreRainSensor && (await this.rainIsWet(settings))) continue;
       await this.config.setKV(`tempFired:${t.id}`, now);
-      await this.journal.add('info', { code: 'temp_trigger', detail: `sensor ${t.sensor} at ${v}° ≥ ${t.aboveC}°` });
+      await this.journal.add('info', {
+        code: 'temp_trigger',
+        detail: `sensor ${t.sensor} at ${formatTempC(v, unit)} ≥ ${formatTempC(t.aboveC, unit)}`,
+      });
       if (t.targetKind === 'zone') {
         const zone = this.zone(t.targetId);
         if (zone) {
@@ -1782,20 +1788,27 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
         fc.precipitationMm >= wt.rainAmountMm
       )
         reasons.push(`rain forecast ${fc.precipitationProbability}% / ${fc.precipitationMm}mm`);
+      const unit = settings.tempUnit ?? 'C';
       if (wt.enabled && wt.freezeC != null && fc.tempMaxC != null && fc.tempMaxC <= wt.freezeC)
-        reasons.push(`freeze forecast ${fc.tempMaxC}°`);
+        reasons.push(`freeze forecast ${formatTempC(fc.tempMaxC, unit)}`);
       const ts_ = settings.tempScale;
       if (ts_.enabled && (!group || ts_.groups.length === 0 || ts_.groups.includes(group.id)) && fc.tempMaxC != null) {
         for (const step of ts_.steps) {
           if (step.action === 'skip' && step.belowC != null && fc.tempMaxC < step.belowC)
-            reasons.push(`forecast max ${fc.tempMaxC}° below ${step.belowC}° (temp scaling: skip)`);
+            reasons.push(
+              `forecast max ${formatTempC(fc.tempMaxC, unit)} below ${formatTempC(step.belowC, unit)} (temp scaling: skip)`,
+            );
         }
       }
       for (const c of schedule?.conditions ?? []) {
         if (c.action === 'scale') continue; // scales the duration, never skips
         const actual = c.kind === 'forecast_max' ? fc.tempMaxC : c.kind === 'forecast_rain_prob' ? fc.precipitationProbability : null;
         if (actual != null && !(c.op === 'gte' ? actual >= c.value : actual <= c.value))
-          reasons.push(`condition: forecast ${c.kind === 'forecast_max' ? `${actual}°` : `${actual}%`} not ${c.op === 'gte' ? '≥' : '≤'} ${c.value}`);
+          reasons.push(
+            `condition: forecast ${
+              c.kind === 'forecast_max' ? formatTempC(actual, unit) : `${actual}%`
+            } not ${c.op === 'gte' ? '≥' : '≤'} ${c.kind === 'forecast_max' ? formatTempC(c.value, unit) : c.value}`,
+          );
       }
     }
     // live-sensor conditions can change by start time — mark as "maybe"

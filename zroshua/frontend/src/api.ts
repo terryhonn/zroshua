@@ -158,10 +158,14 @@ export interface EngineState {
   sourceLevels?: { sourceId: string; name: string; capacityL: number; levelL: number | null; levelPct: number | null }[];
 }
 
+export type TempUnit = 'C' | 'F';
+
 export interface Settings {
   maxTotalFlowLpm: number | null;
   energyTariffPerKwh: number | null;
   energyCurrency: string | null;
+  /** Display/input unit for temperatures; thresholds are always stored as °C. */
+  tempUnit: TempUnit;
   conflictPolicy: 'wait' | 'skip';
   weatherEntity: string | null;
   rainSensor: {

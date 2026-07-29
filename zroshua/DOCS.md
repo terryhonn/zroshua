@@ -114,6 +114,9 @@ the run is skipped with a journal reason).
   overridable in Settings).
 - Rain skip: probability ≥ X % **and** forecast amount ≥ Y mm.
 - Freeze protect below a configurable temperature.
+- **Temperature unit** (Settings, next to Language): Celsius or Fahrenheit for all
+  temperature displays and inputs. Values are stored as °C; HA °F sensors/forecasts
+  are converted before comparison.
 - **Temperature scaling** in percent steps (e.g. below 20 °C → skip, below 25 °C → −30 %,
   above 30 °C → +30 %) driven by the forecast max, yesterday's local sensor max, or a
   combination (max / average). Schedule planning reserves the worst-case boost so extended

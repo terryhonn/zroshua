@@ -38,10 +38,17 @@ export type NotificationProvider =
   | { type: 'telegram'; chatIds: string[]; events: string[] }
   | { type: 'ha_notify'; service: string; events: string[] };
 
+export type TempUnit = 'C' | 'F';
+
 export interface Settings {
   maxTotalFlowLpm: number | null;
   energyTariffPerKwh: number | null;
   energyCurrency: string | null;
+  /**
+   * Display / input unit for temperatures in the UI and journal messages.
+   * Thresholds and engine comparisons are always stored and evaluated in °C.
+   */
+  tempUnit: TempUnit;
   /** wait = queue until rules allow (default); skip = drop a scheduled run that cannot start on time */
   conflictPolicy: 'wait' | 'skip';
   weatherEntity: string | null;
@@ -87,6 +94,7 @@ export const defaultSettings: Settings = {
   maxTotalFlowLpm: null,
   energyTariffPerKwh: null,
   energyCurrency: null,
+  tempUnit: 'C',
   conflictPolicy: 'wait',
   weatherEntity: null,
   rainSensor: {

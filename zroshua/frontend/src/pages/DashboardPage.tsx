@@ -31,10 +31,11 @@ import {
 } from '@tabler/icons-react';
 import { ThemeIcon } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { api, EngineState, Group as ZGroup, Upcoming, WeatherNow, Zone } from '../api';
+import { api, EngineState, Group as ZGroup, Settings, Upcoming, WeatherNow, Zone } from '../api';
 import { fmtDur, fmtTime, useResource } from '../hooks';
 import { t, locale } from '../i18n';
 import { SliderInput } from '../components/common';
+import { formatTemp, TempUnit } from '../units';
 
 function InfoTile({
   label,
@@ -75,6 +76,8 @@ function InfoTile({
 
 export default function DashboardPage({ state }: { state: EngineState | null }) {
   const { data: weather } = useResource<WeatherNow>('/weather');
+  const { data: settings } = useResource<Settings>('/settings');
+  const tempUnit: TempUnit = settings?.tempUnit === 'F' ? 'F' : 'C';
   const { data: upcoming } = useResource<Upcoming[]>('/upcoming', [state?.active.length]);
   const { data: zones } = useResource<Zone[]>('/zones');
   const { data: groups } = useResource<ZGroup[]>('/groups');
@@ -242,7 +245,7 @@ export default function DashboardPage({ state }: { state: EngineState | null }) 
               <>
                 <Group>
                   <Text size="xl" fw={700}>
-                    {weather.temperature != null ? `${weather.temperature}°` : '—'}
+                    {formatTemp(weather.temperature, tempUnit)}
                   </Text>
                   <Text c="dimmed">{weather.condition ? t(weather.condition) : ''}</Text>
                   {weather.humidity != null && <Text c="dimmed">💧 {weather.humidity}%</Text>}
@@ -254,7 +257,7 @@ export default function DashboardPage({ state }: { state: EngineState | null }) 
                         {new Date(Date.now() + i * 86400000).toLocaleDateString(locale, { weekday: 'short' })}
                       </Text>
                       <Text size="sm" fw={600}>
-                        {f.tempMaxC != null ? `${Math.round(f.tempMaxC)}°` : '—'}
+                        {formatTemp(f.tempMaxC, tempUnit)}
                       </Text>
                       <Text size="xs" c="blue">
                         {f.precipitationProbability != null ? `${f.precipitationProbability}%` : ''}

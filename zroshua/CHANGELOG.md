@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Temperature unit (Celsius / Fahrenheit).** Settings → same card as Language:
+  choose °C or °F. Thresholds stay stored in °C; the UI converts for weather,
+  freeze protect, temperature scaling steps, heat triggers, and forecast-max
+  run conditions. Journal / skip reasons use the chosen unit. HA sensors and
+  weather that report °F are normalized to °C before comparison.
 - **Zone auto-allow gate.** Each zone has a sticky *Allow automatic watering*
   flag (default on). When off, schedules, soil and heat triggers skip that zone
   with journal code `auto_disabled`; manual *Water now* still works. With MQTT,

@@ -19,6 +19,7 @@ import { useResource } from '../hooks';
 import { EntityMultiSelect, EntitySelect, SliderInput } from '../components/common';
 import { t } from '../i18n';
 import { HintLabel, HintTitle } from '../components/Hint';
+import { TempUnit, displayTemp, tempSuffix, toStoredC } from '../units';
 
 export default function SensorsPage() {
   const { data: settings, reload } = useResource<Settings>('/settings');
@@ -31,6 +32,9 @@ export default function SensorsPage() {
   }, [settings]);
 
   if (!s) return null;
+
+  const unit: TempUnit = s.tempUnit === 'F' ? 'F' : 'C';
+  const deg = tempSuffix(unit);
 
   const save = async () => {
     try {
@@ -265,7 +269,12 @@ export default function SensorsPage() {
                   />
                 </Group>
                 <Group grow mt="xs">
-                  <NumberInput label={t('Above (°C)')} value={trigger.aboveC} onChange={(v) => set({ aboveC: Number(v) || 30 })} />
+                  <NumberInput
+                    label={t('Above ({unit})', { unit: deg })}
+                    suffix={deg}
+                    value={displayTemp(trigger.aboveC, unit)}
+                    onChange={(v) => set({ aboveC: toStoredC(v, unit) ?? 30 })}
+                  />
                   <TextInput type="time" label={t('Window from')} value={trigger.windowFrom} onChange={(e) => e.target.value && set({ windowFrom: e.target.value })} />
                   <TextInput type="time" label={t('Window to')} value={trigger.windowTo} onChange={(e) => e.target.value && set({ windowTo: e.target.value })} />
                 </Group>

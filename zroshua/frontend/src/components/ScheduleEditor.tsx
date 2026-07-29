@@ -1,17 +1,13 @@
 import { ActionIcon, Badge, Button, Card, Checkbox, Collapse, Group, NumberInput, SegmentedControl, Select, Stack, Switch, Text, TextInput } from '@mantine/core';
 import { IconChevronDown, IconPlus, IconTrash } from '@tabler/icons-react';
 import { useState } from 'react';
-import { Schedule, ScheduleCondition } from '../api';
+import { Schedule, ScheduleCondition, Settings } from '../api';
 import TimeSlotPicker, { BusyBand, unionBands } from './TimeSlotPicker';
 import { EntityMultiSelect } from './common';
 import { t } from '../i18n';
 import { HintLabel } from './Hint';
-
-const CONDITION_KINDS = [
-  { value: 'forecast_max', label: t('Forecast max temp today (°C)') },
-  { value: 'forecast_rain_prob', label: t('Forecast rain probability (%)') },
-  { value: 'sensor', label: t('Sensor value at start time') },
-];
+import { useResource } from '../hooks';
+import { displayTemp, tempSuffix, TempUnit, toStoredC } from '../units';
 
 const DAY_KEYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
 const DAY_NUM: Record<string, number> = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
@@ -87,6 +83,14 @@ export default function ScheduleEditor({
   busy?: BusyBand[];
 }) {
   const [durOpen, setDurOpen] = useState(false);
+  const { data: settings } = useResource<Settings>('/settings');
+  const unit: TempUnit = settings?.tempUnit === 'F' ? 'F' : 'C';
+  const deg = tempSuffix(unit);
+  const conditionKinds = [
+    { value: 'forecast_max', label: t('Forecast max temp today ({unit})', { unit: deg }) },
+    { value: 'forecast_rain_prob', label: t('Forecast rain probability (%)') },
+    { value: 'sensor', label: t('Sensor value at start time') },
+  ];
   const runMinutes = zones
     ? estimateRunMinutes(schedule, zones, mode, parallelLimit, interZoneDelayS, multiplierPct)
     : 0;
@@ -298,7 +302,7 @@ export default function ScheduleEditor({
                   <Select
                     size="xs"
                     style={{ flexGrow: 1, minWidth: 180, maxWidth: 320 }}
-                    data={CONDITION_KINDS}
+                    data={conditionKinds}
                     value={c.kind}
                     onChange={(v) => setC({ kind: (v as ScheduleCondition['kind']) ?? 'forecast_max' })}
                   />
@@ -354,7 +358,20 @@ export default function ScheduleEditor({
                   value={c.op}
                   onChange={(v) => setC({ op: (v as 'gte' | 'lte') ?? 'gte' })}
                 />
-                <NumberInput size="xs" w={86} value={c.value} onChange={(v) => setC({ value: Number(v) || 0 })} />
+                <NumberInput
+                  size="xs"
+                  w={96}
+                  suffix={c.kind === 'forecast_max' ? deg : c.kind === 'forecast_rain_prob' ? '%' : undefined}
+                  value={c.kind === 'forecast_max' ? displayTemp(c.value, unit) : c.value}
+                  onChange={(v) =>
+                    setC({
+                      value:
+                        c.kind === 'forecast_max'
+                          ? toStoredC(v, unit) ?? 0
+                          : Number(v) || 0,
+                    })
+                  }
+                />
                 <Text size="xs" c="dimmed" ml={4}>
                   {t('else')}
                 </Text>

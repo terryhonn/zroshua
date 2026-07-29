@@ -22,6 +22,7 @@ import { useResource } from '../hooks';
 import { EntitySelect, SliderInput } from '../components/common';
 import { LANG_OPTIONS, setLang, storedLang, t } from '../i18n';
 import { HintLabel, HintTitle } from '../components/Hint';
+import { TempUnit, displayTemp, tempSuffix, toStoredC } from '../units';
 
 const EVENTS = [
   { value: 'run_start', label: t('Run started') },
@@ -68,10 +69,26 @@ export default function SettingsPage() {
 
   if (!s) return null;
 
+  const unit: TempUnit = s.tempUnit === 'F' ? 'F' : 'C';
+  const deg = tempSuffix(unit);
+
   const save = async () => {
     try {
       await api.put('/settings', s);
       notifications.show({ message: t('Settings saved'), color: 'teal' });
+      reload();
+    } catch (e: any) {
+      notifications.show({ message: e.message, color: 'red' });
+    }
+  };
+
+  /** Persist temp unit immediately (same card as Language — no need to hit Save settings). */
+  const setTempUnit = async (next: TempUnit) => {
+    const patched = { ...s, tempUnit: next };
+    setS(patched);
+    try {
+      await api.put('/settings', patched);
+      notifications.show({ message: t('Temperature unit saved'), color: 'teal' });
       reload();
     } catch (e: any) {
       notifications.show({ message: e.message, color: 'red' });
@@ -111,14 +128,30 @@ export default function SettingsPage() {
       <MqttStatusBanner />
 
       <Card withBorder>
-        <Select
-          label={<HintLabel label={t('Language')} hint={t('Home Assistant does not share your account language with add-ons, so this follows your device by default — override it here.')} />}
-          data={LANG_OPTIONS}
-          value={storedLang()}
-          onChange={(v) => v && setLang(v)}
-          w={280}
-          comboboxProps={{ withinPortal: true }}
-        />
+        <Group grow align="flex-start" wrap="wrap">
+          <Select
+            label={<HintLabel label={t('Language')} hint={t('Home Assistant does not share your account language with add-ons, so this follows your device by default — override it here.')} />}
+            data={LANG_OPTIONS}
+            value={storedLang()}
+            onChange={(v) => v && setLang(v)}
+            comboboxProps={{ withinPortal: true }}
+          />
+          <Select
+            label={
+              <HintLabel
+                label={t('Temperature unit')}
+                hint={t('Used for weather, freeze protect, temperature scaling, heat triggers and forecast conditions. Values are stored in °C internally; this only changes how they are shown and entered.')}
+              />
+            }
+            data={[
+              { value: 'C', label: t('Celsius (°C)') },
+              { value: 'F', label: t('Fahrenheit (°F)') },
+            ]}
+            value={unit}
+            onChange={(v) => v && setTempUnit(v as TempUnit)}
+            comboboxProps={{ withinPortal: true }}
+          />
+        </Group>
       </Card>
 
       <Card withBorder>
@@ -157,9 +190,18 @@ export default function SettingsPage() {
             />
           </Group>
           <NumberInput
-            label={<HintLabel label={t('Freeze protect below')} hint={t('°C, empty = off')} />}
-            value={s.weatherTriggers.freezeC ?? ''}
-            onChange={(v) => setS({ ...s, weatherTriggers: { ...s.weatherTriggers, freezeC: v === '' ? null : Number(v) } })}
+            label={<HintLabel label={t('Freeze protect below')} hint={t('{unit}, empty = off', { unit: deg })} />}
+            suffix={deg}
+            value={s.weatherTriggers.freezeC == null ? '' : displayTemp(s.weatherTriggers.freezeC, unit)}
+            onChange={(v) =>
+              setS({
+                ...s,
+                weatherTriggers: {
+                  ...s.weatherTriggers,
+                  freezeC: v === '' ? null : toStoredC(v, unit),
+                },
+              })
+            }
           />
         </Stack>
       </Card>
@@ -213,19 +255,20 @@ export default function SettingsPage() {
                   value={st.belowC !== undefined ? 'below' : 'above'}
                   onChange={(v) => {
                     const steps = [...s.tempScale.steps];
-                    const threshold = st.belowC ?? st.aboveC ?? 20;
+                    const threshold = st.belowC ?? st.aboveC ?? 20; // already °C in storage
                     steps[i] = v === 'below' ? { ...st, belowC: threshold, aboveC: undefined } : { ...st, aboveC: threshold, belowC: undefined };
                     setS({ ...s, tempScale: { ...s.tempScale, steps } });
                   }}
                 />
                 <NumberInput
-                  w={90}
+                  w={100}
                   size="xs"
-                  suffix="°C"
-                  value={st.belowC ?? st.aboveC ?? 20}
+                  suffix={deg}
+                  value={displayTemp(st.belowC ?? st.aboveC ?? 20, unit)}
                   onChange={(v) => {
                     const steps = [...s.tempScale.steps];
-                    steps[i] = st.belowC !== undefined ? { ...st, belowC: Number(v) } : { ...st, aboveC: Number(v) };
+                    const stored = toStoredC(v, unit) ?? 20;
+                    steps[i] = st.belowC !== undefined ? { ...st, belowC: stored } : { ...st, aboveC: stored };
                     setS({ ...s, tempScale: { ...s.tempScale, steps } });
                   }}
                 />
