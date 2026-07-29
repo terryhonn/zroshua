@@ -28,6 +28,8 @@ import ScheduleEditor, { emptySchedule, estimateRunMinutes, ZoneInfo } from '../
 import { BusyBand, overlapsConflict, toMin } from '../components/TimeSlotPicker';
 import { HintLabel } from '../components/Hint';
 
+const HIDE_DISABLED_KEY = 'zroshua.hideDisabledGroups';
+
 export default function GroupsPage() {
   const { data: groups, reload } = useResource<ZGroup[]>('/groups');
   const { data: zones } = useResource<Zone[]>('/zones');
@@ -40,8 +42,22 @@ export default function GroupsPage() {
   const [ruleGroups, setRuleGroups] = useState<string[]>([]);
   const [ruleBefore, setRuleBefore] = useState<string | null>(null);
   const [ruleAfter, setRuleAfter] = useState<string | null>(null);
-  /** When on, hide disabled groups on the list and disabled schedules in the editor. Default off. */
-  const [hideDisabled, setHideDisabled] = useState(false);
+  /** When on, hide disabled groups on the list and disabled schedules in the editor. Default off; persisted. */
+  const [hideDisabled, setHideDisabled] = useState(() => {
+    try {
+      return localStorage.getItem(HIDE_DISABLED_KEY) === '1';
+    } catch {
+      return false;
+    }
+  });
+  const setHideDisabledPersist = (on: boolean) => {
+    setHideDisabled(on);
+    try {
+      localStorage.setItem(HIDE_DISABLED_KEY, on ? '1' : '0');
+    } catch {
+      /* private mode */
+    }
+  };
 
   const notifyErr = (e: any) => notifications.show({ message: e.message, color: 'red' });
   const groupOpts = (groups ?? []).map((g) => ({ value: g.id, label: g.name }));
@@ -124,7 +140,7 @@ export default function GroupsPage() {
           <Switch
             label={t('Hide Disabled')}
             checked={hideDisabled}
-            onChange={(e) => setHideDisabled(e.currentTarget.checked)}
+            onChange={(e) => setHideDisabledPersist(e.currentTarget.checked)}
           />
           <Button onClick={() => openEditor({ name: '', zoneIds: [], mode: 'sequential', parallelLimit: 2, interZoneDelayS: 0, multiplierPct: 100, priority: 0, schedules: [], enabled: true })}>
             {t('Add group')}
