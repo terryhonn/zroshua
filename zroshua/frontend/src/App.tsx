@@ -148,7 +148,7 @@ export default function App() {
       </AppShell.Navbar>
 
       <AppShell.Main>
-        {page === 'dashboard' && <DashboardPage state={state} />}
+        {page === 'dashboard' && <DashboardPage state={state} journalTick={journalTick} />}
         {page === 'timeline' && <TimelinePage />}
         {page === 'map' && <MapPage state={state} />}
         {page === 'zones' && <ZonesPage state={state} />}

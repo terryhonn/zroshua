@@ -7,6 +7,7 @@ import {
   Group,
   Modal,
   Progress,
+  ScrollArea,
   Stack,
   Text,
   Title,
@@ -15,6 +16,7 @@ import {
   ActionIcon,
   Tooltip,
   Menu,
+  ThemeIcon,
 } from '@mantine/core';
 import {
   IconAlertTriangle,
@@ -29,13 +31,30 @@ import {
   IconClockHour4,
   IconCalendarClock,
 } from '@tabler/icons-react';
-import { ThemeIcon } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { api, EngineState, Group as ZGroup, Settings, Upcoming, WeatherNow, Zone } from '../api';
-import { fmtDur, fmtTime, useResource } from '../hooks';
+import { fmtDur, fmtTime, useJournal, useResource } from '../hooks';
 import { t, locale } from '../i18n';
 import { SliderInput } from '../components/common';
 import { formatTemp, TempUnit } from '../units';
+
+const JOURNAL_KIND_COLORS: Record<string, string> = {
+  run_start: 'teal',
+  run_end: 'blue',
+  skip: 'yellow',
+  fault: 'red',
+  info: 'gray',
+  adjust: 'grape',
+};
+
+const JOURNAL_KIND_LABELS: Record<string, string> = {
+  run_start: 'Run started',
+  run_end: 'Run ended',
+  skip: 'Skipped',
+  fault: 'Fault',
+  info: 'Info',
+  adjust: 'Adjustment',
+};
 
 function InfoTile({
   label,
@@ -74,17 +93,24 @@ function InfoTile({
   );
 }
 
-export default function DashboardPage({ state }: { state: EngineState | null }) {
+export default function DashboardPage({ state, journalTick = 0 }: { state: EngineState | null; journalTick?: number }) {
   const { data: weather } = useResource<WeatherNow>('/weather');
   const { data: settings } = useResource<Settings>('/settings');
   const tempUnit: TempUnit = settings?.tempUnit === 'F' ? 'F' : 'C';
   const { data: upcoming } = useResource<Upcoming[]>('/upcoming', [state?.active.length]);
   const { data: zones } = useResource<Zone[]>('/zones');
   const { data: groups } = useResource<ZGroup[]>('/groups');
+  const journal = useJournal(journalTick);
   const { data: today } = useResource<{ totals: { minutes: number; litersMin: number; litersMax: number } }>(
     '/stats/daily?days=1',
     [state?.active.length],
   );
+
+  const nameOf = (zoneId: string | null, groupId: string | null) => {
+    if (zoneId) return zones?.find((z) => z.id === zoneId)?.name ?? zoneId;
+    if (groupId) return groups?.find((g) => g.id === groupId)?.name ?? groupId;
+    return null;
+  };
   const [nowTick, setNowTick] = useState(Date.now());
   useEffect(() => {
     const id = setInterval(() => setNowTick(Date.now()), 30_000);
@@ -170,248 +196,316 @@ export default function DashboardPage({ state }: { state: EngineState | null }) 
       </SimpleGrid>
       <Grid>
         <Grid.Col span={{ base: 12, md: 7 }}>
-          <Card withBorder>
-            <Title order={4} mb="sm">
-              {t('Now')}
-            </Title>
-            {state?.active.length ? (
-              <Stack gap="sm">
-                {state.active.map((a) => (
-                  <div key={a.zoneId}>
-                    <Group justify="space-between" mb={4}>
-                      <Group gap="xs">
-                        <Text fw={600}>{a.zoneName}</Text>
-                        <Badge size="xs" variant="light">
-                          {t(a.triggeredBy)}
-                        </Badge>
+          <Stack gap="md">
+            <Card withBorder>
+              <Title order={4} mb="sm">
+                {t('Now')}
+              </Title>
+              {state?.active.length ? (
+                <Stack gap="sm">
+                  {state.active.map((a) => (
+                    <div key={a.zoneId}>
+                      <Group justify="space-between" mb={4}>
+                        <Group gap="xs">
+                          <Text fw={600}>{a.zoneName}</Text>
+                          <Badge size="xs" variant="light">
+                            {t(a.triggeredBy)}
+                          </Badge>
+                        </Group>
+                        <Group gap="xs">
+                          <Text size="sm" c="dimmed">
+                            {t('ends {time}', { time: fmtTime(a.endsAt) })}
+                          </Text>
+                          <ActionIcon
+                            variant="light"
+                            onClick={() => act(() => api.post(`/zones/${a.zoneId}/extend`, { minutes: 5 }), t('+5 min'))}
+                            title={t('+5 min')}
+                          >
+                            <IconPlus size={16} />
+                          </ActionIcon>
+                          <ActionIcon
+                            color="red"
+                            variant="light"
+                            onClick={() => act(() => api.post(`/zones/${a.zoneId}/stop`), t('Stopped'))}
+                            title={t('Stop')}
+                          >
+                            <IconPlayerStop size={16} />
+                          </ActionIcon>
+                        </Group>
                       </Group>
-                      <Group gap="xs">
-                        <Text size="sm" c="dimmed">
-                          {t('ends {time}', { time: fmtTime(a.endsAt) })}
-                        </Text>
-                        <ActionIcon
-                          variant="light"
-                          onClick={() => act(() => api.post(`/zones/${a.zoneId}/extend`, { minutes: 5 }), t('+5 min'))}
-                          title={t('+5 min')}
-                        >
-                          <IconPlus size={16} />
-                        </ActionIcon>
-                        <ActionIcon
-                          color="red"
-                          variant="light"
-                          onClick={() => act(() => api.post(`/zones/${a.zoneId}/stop`), t('Stopped'))}
-                          title={t('Stop')}
-                        >
-                          <IconPlayerStop size={16} />
-                        </ActionIcon>
-                      </Group>
-                    </Group>
-                    <Progress value={a.progress * 100} animated />
-                  </div>
-                ))}
-              </Stack>
-            ) : (
-              <Text c="dimmed">{t('Nothing is watering right now.')}</Text>
-            )}
-
-            {state?.queue.length ? (
-              <>
-                <Title order={5} mt="md" mb="xs">
-                  {t('Queue')}
-                </Title>
-                <Stack gap={4}>
-                  {state.queue.map((q, i) => (
-                    <Group key={i} justify="space-between">
-                      <Text size="sm">
-                        {q.zoneName} — {fmtDur(q.durationMin)}
-                      </Text>
-                      <Badge variant="light" color="gray">
-                        {q.waitReason}
-                      </Badge>
-                    </Group>
+                      <Progress value={a.progress * 100} animated />
+                    </div>
                   ))}
                 </Stack>
-              </>
-            ) : null}
-          </Card>
+              ) : (
+                <Text c="dimmed">{t('Nothing is watering right now.')}</Text>
+              )}
+
+              {state?.queue.length ? (
+                <>
+                  <Title order={5} mt="md" mb="xs">
+                    {t('Queue')}
+                  </Title>
+                  <Stack gap={4}>
+                    {state.queue.map((q, i) => (
+                      <Group key={i} justify="space-between">
+                        <Text size="sm">
+                          {q.zoneName} — {fmtDur(q.durationMin)}
+                        </Text>
+                        <Badge variant="light" color="gray">
+                          {q.waitReason}
+                        </Badge>
+                      </Group>
+                    ))}
+                  </Stack>
+                </>
+              ) : null}
+            </Card>
+
+            <Card withBorder>
+              <Title order={4} mb="sm">
+                {t('Upcoming waterings')}
+              </Title>
+              {next.length ? (
+                <Stack gap="xs">
+                  {next.map((u, i) => {
+                    const paused = u.snoozeUntil != null && u.snoozeUntil > Date.now();
+                    const dim = u.willSkip || paused ? 0.55 : 1;
+                    return (
+                      <Flex
+                        key={i}
+                        direction={{ base: 'column', sm: 'row' }}
+                        align={{ base: 'stretch', sm: 'center' }}
+                        justify="space-between"
+                        gap={{ base: 4, sm: 'sm' }}
+                        style={{
+                          borderBottom:
+                            i < next.length - 1 ? '1px solid var(--mantine-color-default-border)' : undefined,
+                          paddingBottom: 6,
+                        }}
+                      >
+                        <Text style={{ opacity: dim, minWidth: 0 }} truncate>
+                          <b>{u.groupName}</b>
+                          {u.kind === 'zone' ? '' : u.zones.length ? ` — ${u.zones.map((z) => z.name).join(', ')}` : ''}
+                          {u.kind === 'zone' && (
+                            <Badge size="xs" variant="light" color="blue" ml={6} style={{ verticalAlign: 'middle' }}>
+                              {t('zone')}
+                            </Badge>
+                          )}
+                        </Text>
+                        <Group gap="xs" wrap="wrap" justify="flex-end" style={{ flexShrink: 0 }}>
+                          {paused && (
+                            <Badge variant="light" color="gray" leftSection={<IconPlayerPause size={12} />}>
+                              {t('paused')}
+                            </Badge>
+                          )}
+                          {!paused && u.willSkip && (
+                            <Tooltip label={(u.skipReasons ?? []).join('; ')} multiline maw={320}>
+                              <Badge variant="light" color="red" leftSection={<IconAlertTriangle size={12} />}>
+                                {t('will skip')}
+                              </Badge>
+                            </Tooltip>
+                          )}
+                          {!paused && !u.willSkip && (u.maybeSkip?.length ?? 0) > 0 && (
+                            <Tooltip label={(u.maybeSkip ?? []).join('; ')} multiline maw={320}>
+                              <Badge variant="light" color="yellow" leftSection={<IconAlertTriangle size={12} />}>
+                                {t('may skip')}
+                              </Badge>
+                            </Tooltip>
+                          )}
+                          <Text size="sm" c="dimmed">
+                            {u.zones.length
+                              ? t('{dur} (max {max})', {
+                                  dur: fmtDur(u.durationMin ?? u.zones.reduce((a, z) => a + z.minutes, 0)),
+                                  max: fmtDur(u.maxDurationMin ?? u.zones.reduce((a, z) => a + z.maxMinutes, 0)),
+                                })
+                              : ''}
+                          </Text>
+                          <Badge variant="light" color="grape" style={{ opacity: dim }}>
+                            {countdown(u.ts)}
+                          </Badge>
+                          <Badge variant="light" style={{ opacity: dim }}>
+                            {fmtTime(u.ts)}
+                          </Badge>
+                          <Menu position="bottom-end" withArrow>
+                            <Menu.Target>
+                              <ActionIcon variant="subtle" color={paused ? 'teal' : 'gray'}>
+                                {paused ? <IconPlayerPlay size={16} /> : <IconPlayerPause size={16} />}
+                              </ActionIcon>
+                            </Menu.Target>
+                            <Menu.Dropdown>
+                              <Menu.Label>
+                                {u.kind === 'zone' ? t('{name} · zone', { name: u.groupName }) : u.groupName}
+                              </Menu.Label>
+                              {paused ? (
+                                <Menu.Item leftSection={<IconPlayerPlay size={14} />} onClick={() => pauseRow(u, 0)}>
+                                  {t('Resume')}
+                                </Menu.Item>
+                              ) : (
+                                <>
+                                  <Menu.Item
+                                    leftSection={<IconPlayerPause size={14} />}
+                                    onClick={() =>
+                                      pauseRow(u, Math.max(0.05, (u.ts + 60_000 - Date.now()) / 3600_000))
+                                    }
+                                  >
+                                    {t('Skip this run')}
+                                  </Menu.Item>
+                                  <Menu.Item onClick={() => pauseRow(u, 6)}>{t('Pause {n} h', { n: 6 })}</Menu.Item>
+                                  <Menu.Item onClick={() => pauseRow(u, 12)}>{t('Pause {n} h', { n: 12 })}</Menu.Item>
+                                  <Menu.Item onClick={() => pauseRow(u, 24)}>{t('Pause {n} h', { n: 24 })}</Menu.Item>
+                                </>
+                              )}
+                            </Menu.Dropdown>
+                          </Menu>
+                        </Group>
+                      </Flex>
+                    );
+                  })}
+                </Stack>
+              ) : (
+                <Text c="dimmed">{t('No scheduled waterings in the next 7 days.')}</Text>
+              )}
+            </Card>
+          </Stack>
         </Grid.Col>
 
         <Grid.Col span={{ base: 12, md: 5 }}>
-          <Card withBorder>
-            <Title order={4} mb="sm">
-              {t('Weather')}
-            </Title>
-            {weather?.entity ? (
-              <>
-                <Group>
-                  <Text size="xl" fw={700}>
-                    {formatTemp(weather.temperature, tempUnit)}
-                  </Text>
-                  <Text c="dimmed">{weather.condition ? t(weather.condition) : ''}</Text>
-                  {weather.humidity != null && <Text c="dimmed">💧 {weather.humidity}%</Text>}
-                </Group>
-                <SimpleGrid cols={{ base: 4, sm: 7 }} mt="sm">
-                  {weather.forecast.slice(0, 7).map((f, i) => (
-                    <Stack key={i} gap={0} align="center">
-                      <Text size="xs" c="dimmed">
-                        {new Date(Date.now() + i * 86400000).toLocaleDateString(locale, { weekday: 'short' })}
-                      </Text>
-                      <Text size="sm" fw={600}>
-                        {formatTemp(f.tempMaxC, tempUnit)}
-                      </Text>
-                      <Text size="xs" c="blue">
-                        {f.precipitationProbability != null ? `${f.precipitationProbability}%` : ''}
-                      </Text>
-                    </Stack>
-                  ))}
-                </SimpleGrid>
-              </>
-            ) : (
-              <Text c="dimmed">{t('No weather entity found in Home Assistant.')}</Text>
-            )}
-          </Card>
+          <Stack gap="md">
+            <Card withBorder>
+              <Title order={4} mb="sm">
+                {t('Weather')}
+              </Title>
+              {weather?.entity ? (
+                <>
+                  <Group>
+                    <Text size="xl" fw={700}>
+                      {formatTemp(weather.temperature, tempUnit)}
+                    </Text>
+                    <Text c="dimmed">{weather.condition ? t(weather.condition) : ''}</Text>
+                    {weather.humidity != null && <Text c="dimmed">💧 {weather.humidity}%</Text>}
+                  </Group>
+                  <SimpleGrid cols={{ base: 4, sm: 7 }} mt="sm">
+                    {weather.forecast.slice(0, 7).map((f, i) => (
+                      <Stack key={i} gap={0} align="center">
+                        <Text size="xs" c="dimmed">
+                          {new Date(Date.now() + i * 86400000).toLocaleDateString(locale, { weekday: 'short' })}
+                        </Text>
+                        <Text size="sm" fw={600}>
+                          {formatTemp(f.tempMaxC, tempUnit)}
+                        </Text>
+                        <Text size="xs" c="blue">
+                          {f.precipitationProbability != null ? `${f.precipitationProbability}%` : ''}
+                        </Text>
+                      </Stack>
+                    ))}
+                  </SimpleGrid>
+                </>
+              ) : (
+                <Text c="dimmed">{t('No weather entity found in Home Assistant.')}</Text>
+              )}
+            </Card>
 
-          <Card withBorder mt="md">
-            <Title order={4} mb="sm">
-              {t('Quick actions')}
-            </Title>
-            <Group>
-              <Button color="red" leftSection={<IconPlayerStop size={16} />} onClick={() => act(() => api.post('/stop-all'), t('All stopped'))}>
-                {t('Stop all')}
-              </Button>
-              <Button variant="light" leftSection={<IconPlayerPause size={16} />} onClick={() => setSnoozeOpen(true)}>
-                {state?.snoozeUntil ? `${t('paused')} · ${fmtTime(state.snoozeUntil)}` : t('Pause all')}
-              </Button>
-            </Group>
-            {state?.pumpStates.length ? (
-              <Group mt="sm" gap="xs">
-                {state.pumpStates.map((p) => (
-                  <Badge key={p.sourceId} color={p.on ? 'teal' : 'gray'} variant="light">
-                    {p.on ? t('pump {name}: ON', { name: p.name }) : t('pump {name}: off', { name: p.name })}
-                  </Badge>
-                ))}
+            <Card withBorder>
+              <Title order={4} mb="sm">
+                {t('Quick actions')}
+              </Title>
+              <Group>
+                <Button
+                  color="red"
+                  leftSection={<IconPlayerStop size={16} />}
+                  onClick={() => act(() => api.post('/stop-all'), t('All stopped'))}
+                >
+                  {t('Stop all')}
+                </Button>
+                <Button variant="light" leftSection={<IconPlayerPause size={16} />} onClick={() => setSnoozeOpen(true)}>
+                  {state?.snoozeUntil ? `${t('paused')} · ${fmtTime(state.snoozeUntil)}` : t('Pause all')}
+                </Button>
               </Group>
-            ) : null}
-            {(state?.sourceLevels?.length ?? 0) > 0 && (
-              <Stack gap={6} mt="sm">
-                {state!.sourceLevels!.map((l) => (
-                  <div key={l.sourceId}>
-                    <Group justify="space-between" mb={2}>
-                      <Text size="xs" c="dimmed">
-                        {l.name}
-                      </Text>
-                      <Text size="xs" c="dimmed">
-                        {l.levelL !== null ? t('~{n} L ({pct}%)', { n: l.levelL, pct: String(l.levelPct) }) : '—'}
-                      </Text>
-                    </Group>
-                    <Progress
-                      value={l.levelPct ?? 0}
-                      color={(l.levelPct ?? 100) < 20 ? 'red' : (l.levelPct ?? 100) < 40 ? 'yellow' : 'blue'}
-                      size="sm"
-                    />
-                  </div>
-                ))}
-              </Stack>
-            )}
-          </Card>
+              {state?.pumpStates.length ? (
+                <Group mt="sm" gap="xs">
+                  {state.pumpStates.map((p) => (
+                    <Badge key={p.sourceId} color={p.on ? 'teal' : 'gray'} variant="light">
+                      {p.on ? t('pump {name}: ON', { name: p.name }) : t('pump {name}: off', { name: p.name })}
+                    </Badge>
+                  ))}
+                </Group>
+              ) : null}
+              {(state?.sourceLevels?.length ?? 0) > 0 && (
+                <Stack gap={6} mt="sm">
+                  {state!.sourceLevels!.map((l) => (
+                    <div key={l.sourceId}>
+                      <Group justify="space-between" mb={2}>
+                        <Text size="xs" c="dimmed">
+                          {l.name}
+                        </Text>
+                        <Text size="xs" c="dimmed">
+                          {l.levelL !== null ? t('~{n} L ({pct}%)', { n: l.levelL, pct: String(l.levelPct) }) : '—'}
+                        </Text>
+                      </Group>
+                      <Progress
+                        value={l.levelPct ?? 0}
+                        color={(l.levelPct ?? 100) < 20 ? 'red' : (l.levelPct ?? 100) < 40 ? 'yellow' : 'blue'}
+                        size="sm"
+                      />
+                    </div>
+                  ))}
+                </Stack>
+              )}
+            </Card>
+          </Stack>
         </Grid.Col>
       </Grid>
 
       <Card withBorder>
         <Title order={4} mb="sm">
-          {t('Upcoming waterings')}
+          {t('Journal')}
         </Title>
-        {next.length ? (
-          <Stack gap="xs">
-            {next.map((u, i) => {
-              const paused = u.snoozeUntil != null && u.snoozeUntil > Date.now();
-              const dim = u.willSkip || paused ? 0.55 : 1;
-              return (
-                <Flex
-                  key={i}
-                  direction={{ base: 'column', sm: 'row' }}
-                  align={{ base: 'stretch', sm: 'center' }}
-                  justify="space-between"
-                  gap={{ base: 4, sm: 'sm' }}
-                  style={{ borderBottom: i < next.length - 1 ? '1px solid var(--mantine-color-default-border)' : undefined, paddingBottom: 6 }}
-                >
-                  <Text style={{ opacity: dim, minWidth: 0 }} truncate>
-                    <b>{u.groupName}</b>
-                    {u.kind === 'zone' ? '' : u.zones.length ? ` — ${u.zones.map((z) => z.name).join(', ')}` : ''}
-                    {u.kind === 'zone' && (
-                      <Badge size="xs" variant="light" color="blue" ml={6} style={{ verticalAlign: 'middle' }}>
-                        {t('zone')}
-                      </Badge>
-                    )}
-                  </Text>
-                  <Group gap="xs" wrap="wrap" justify="flex-end" style={{ flexShrink: 0 }}>
-                    {paused && (
-                      <Badge variant="light" color="gray" leftSection={<IconPlayerPause size={12} />}>
-                        {t('paused')}
-                      </Badge>
-                    )}
-                    {!paused && u.willSkip && (
-                      <Tooltip label={(u.skipReasons ?? []).join('; ')} multiline maw={320}>
-                        <Badge variant="light" color="red" leftSection={<IconAlertTriangle size={12} />}>
-                          {t('will skip')}
+        {journal.length ? (
+          <ScrollArea h={320} type="auto" offsetScrollbars>
+            <Stack gap={6} pr="xs">
+              {journal.map((e) => {
+                const target = nameOf(e.zoneId, e.groupId);
+                return (
+                  <Group
+                    key={e.id}
+                    justify="space-between"
+                    align="flex-start"
+                    wrap="nowrap"
+                    gap="sm"
+                    style={{
+                      borderBottom: '1px solid var(--mantine-color-default-border)',
+                      paddingBottom: 6,
+                    }}
+                  >
+                    <Stack gap={2} style={{ minWidth: 0, flex: 1 }}>
+                      <Group gap={6} wrap="wrap">
+                        <Badge size="sm" variant="light" color={JOURNAL_KIND_COLORS[e.kind] ?? 'gray'}>
+                          {t(JOURNAL_KIND_LABELS[e.kind] ?? e.kind)}
+                          {e.code ? `: ${e.code}` : ''}
                         </Badge>
-                      </Tooltip>
-                    )}
-                    {!paused && !u.willSkip && (u.maybeSkip?.length ?? 0) > 0 && (
-                      <Tooltip label={(u.maybeSkip ?? []).join('; ')} multiline maw={320}>
-                        <Badge variant="light" color="yellow" leftSection={<IconAlertTriangle size={12} />}>
-                          {t('may skip')}
-                        </Badge>
-                      </Tooltip>
-                    )}
-                    <Text size="sm" c="dimmed">
-                      {u.zones.length
-                        ? t('{dur} (max {max})', {
-                            dur: fmtDur(u.durationMin ?? u.zones.reduce((a, z) => a + z.minutes, 0)),
-                            max: fmtDur(u.maxDurationMin ?? u.zones.reduce((a, z) => a + z.maxMinutes, 0)),
-                          })
-                        : ''}
-                    </Text>
-                    <Badge variant="light" color="grape" style={{ opacity: dim }}>
-                      {countdown(u.ts)}
-                    </Badge>
-                    <Badge variant="light" style={{ opacity: dim }}>
-                      {fmtTime(u.ts)}
-                    </Badge>
-                    <Menu position="bottom-end" withArrow>
-                      <Menu.Target>
-                        <ActionIcon variant="subtle" color={paused ? 'teal' : 'gray'}>
-                          {paused ? <IconPlayerPlay size={16} /> : <IconPlayerPause size={16} />}
-                        </ActionIcon>
-                      </Menu.Target>
-                      <Menu.Dropdown>
-                        <Menu.Label>{u.kind === 'zone' ? t('{name} · zone', { name: u.groupName }) : u.groupName}</Menu.Label>
-                        {paused ? (
-                          <Menu.Item leftSection={<IconPlayerPlay size={14} />} onClick={() => pauseRow(u, 0)}>
-                            {t('Resume')}
-                          </Menu.Item>
-                        ) : (
-                          <>
-                            <Menu.Item
-                              leftSection={<IconPlayerPause size={14} />}
-                              onClick={() => pauseRow(u, Math.max(0.05, (u.ts + 60_000 - Date.now()) / 3600_000))}
-                            >
-                              {t('Skip this run')}
-                            </Menu.Item>
-                            <Menu.Item onClick={() => pauseRow(u, 6)}>{t('Pause {n} h', { n: 6 })}</Menu.Item>
-                            <Menu.Item onClick={() => pauseRow(u, 12)}>{t('Pause {n} h', { n: 12 })}</Menu.Item>
-                            <Menu.Item onClick={() => pauseRow(u, 24)}>{t('Pause {n} h', { n: 24 })}</Menu.Item>
-                          </>
+                        {target && (
+                          <Text size="sm" fw={500} truncate>
+                            {target}
+                          </Text>
                         )}
-                      </Menu.Dropdown>
-                    </Menu>
+                      </Group>
+                      {e.detail && (
+                        <Text size="sm" c="dimmed" style={{ overflowWrap: 'anywhere' }}>
+                          {e.detail}
+                        </Text>
+                      )}
+                    </Stack>
+                    <Text size="xs" c="dimmed" style={{ whiteSpace: 'nowrap', flexShrink: 0 }}>
+                      {new Date(Number(e.ts)).toLocaleString(locale)}
+                    </Text>
                   </Group>
-                </Flex>
-              );
-            })}
-          </Stack>
+                );
+              })}
+            </Stack>
+          </ScrollArea>
         ) : (
-          <Text c="dimmed">{t('No scheduled waterings in the next 7 days.')}</Text>
+          <Text c="dimmed">{t('No journal entries yet.')}</Text>
         )}
       </Card>
 

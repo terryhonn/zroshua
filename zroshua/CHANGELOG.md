@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.1
+
+- **Dashboard layout:** Upcoming waterings sit under **Now** (left column,
+  beside Weather / Quick actions). The former upcoming slot is a live,
+  scrollable **Journal** feed.
+
 ## 0.4.0
 
 - **Zone auto-allow gate.** Each zone has a sticky *Allow automatic watering*
