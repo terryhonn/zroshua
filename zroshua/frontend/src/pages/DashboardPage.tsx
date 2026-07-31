@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState, type DragEvent, type ReactNode } from 'react';
 import {
   Button,
   Card,
@@ -56,22 +56,127 @@ const JOURNAL_KIND_LABELS: Record<string, string> = {
   adjust: 'Adjustment',
 };
 
+/** Dashboard top tiles — order is user-draggable and persisted. */
+type TileId = 'watering_now' | 'zones' | 'groups' | 'today_water' | 'today_time' | 'next_watering';
+type TodayTimeFormat = 'min' | 'hm';
+
+const DEFAULT_TILE_ORDER: TileId[] = [
+  'watering_now',
+  'zones',
+  'groups',
+  'today_water',
+  'today_time',
+  'next_watering',
+];
+const TILE_ORDER_KEY = 'zroshua.dashboardTileOrder';
+const TODAY_TIME_FMT_KEY = 'zroshua.dashboardTodayTimeFormat';
+
+function loadTileOrder(): TileId[] {
+  try {
+    const raw = localStorage.getItem(TILE_ORDER_KEY);
+    if (!raw) return [...DEFAULT_TILE_ORDER];
+    const parsed = JSON.parse(raw) as string[];
+    if (!Array.isArray(parsed)) return [...DEFAULT_TILE_ORDER];
+    const known = new Set<string>(DEFAULT_TILE_ORDER);
+    const order = parsed.filter((id): id is TileId => known.has(id));
+    for (const id of DEFAULT_TILE_ORDER) if (!order.includes(id)) order.push(id);
+    return order;
+  } catch {
+    return [...DEFAULT_TILE_ORDER];
+  }
+}
+
+function saveTileOrder(order: TileId[]) {
+  try {
+    localStorage.setItem(TILE_ORDER_KEY, JSON.stringify(order));
+  } catch {
+    /* private mode */
+  }
+}
+
+function loadTodayTimeFormat(): TodayTimeFormat {
+  try {
+    return localStorage.getItem(TODAY_TIME_FMT_KEY) === 'hm' ? 'hm' : 'min';
+  } catch {
+    return 'min';
+  }
+}
+
+function saveTodayTimeFormat(fmt: TodayTimeFormat) {
+  try {
+    localStorage.setItem(TODAY_TIME_FMT_KEY, fmt);
+  } catch {
+    /* private mode */
+  }
+}
+
+/** Minutes as "142 min" or "2 hrs, 22 min". */
+function formatTodayMinutes(minutes: number, fmt: TodayTimeFormat): string {
+  const m = Math.max(0, Math.round(minutes));
+  if (fmt === 'min') return t('{n} min', { n: m });
+  const h = Math.floor(m / 60);
+  const rem = m % 60;
+  if (h <= 0) return t('{n} min', { n: rem });
+  if (rem === 0) return t('{h} hrs', { h });
+  return t('{h} hrs, {m} min', { h, m: rem });
+}
+
 function InfoTile({
   label,
   value,
   sub,
   icon,
   color,
+  onClick,
+  clickable,
+  dragging,
+  dragOver,
+  onDragStart,
+  onDragOver,
+  onDragLeave,
+  onDrop,
+  onDragEnd,
 }: {
   label: string;
   value: string;
   sub?: string;
-  icon: React.ReactNode;
+  icon: ReactNode;
   color: string;
+  onClick?: () => void;
+  clickable?: boolean;
+  dragging?: boolean;
+  dragOver?: boolean;
+  onDragStart?: (e: DragEvent) => void;
+  onDragOver?: (e: DragEvent) => void;
+  onDragLeave?: (e: DragEvent) => void;
+  onDrop?: (e: DragEvent) => void;
+  onDragEnd?: (e: DragEvent) => void;
 }) {
   return (
-    <Card p="sm">
-      <Group gap="sm" wrap="nowrap" align="flex-start">
+    <Card
+      p="sm"
+      draggable
+      onDragStart={onDragStart}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+      onDragEnd={onDragEnd}
+      onClick={onClick}
+      style={{
+        cursor: clickable ? 'pointer' : 'grab',
+        opacity: dragging ? 0.45 : 1,
+        outline: dragOver ? '2px solid var(--mantine-color-teal-5)' : undefined,
+        outlineOffset: 2,
+        userSelect: 'none',
+        transition: 'opacity 0.12s ease, outline 0.12s ease',
+      }}
+      title={
+        clickable
+          ? t('Drag to reorder · Click to toggle format')
+          : t('Drag to reorder')
+      }
+    >
+      <Group gap="sm" wrap="nowrap" align="flex-start" style={{ pointerEvents: 'none' }}>
         <ThemeIcon variant="light" color={color} size={40} radius="md">
           {icon}
         </ThemeIcon>
@@ -127,6 +232,12 @@ export default function DashboardPage({ state, journalTick = 0 }: { state: Engin
   };
   const [snoozeOpen, setSnoozeOpen] = useState(false);
   const [hours, setHours] = useState(24);
+  const [tileOrder, setTileOrder] = useState<TileId[]>(loadTileOrder);
+  const [todayTimeFmt, setTodayTimeFmt] = useState<TodayTimeFormat>(loadTodayTimeFormat);
+  const [dragId, setDragId] = useState<TileId | null>(null);
+  const [overId, setOverId] = useState<TileId | null>(null);
+  /** Ignore click after a real drag so reordering does not toggle Today time. */
+  const didDrag = useRef(false);
 
   const act = async (fn: () => Promise<unknown>, ok: string) => {
     try {
@@ -150,49 +261,138 @@ export default function DashboardPage({ state, journalTick = 0 }: { state: Engin
     ? Math.round((today.totals.litersMin + today.totals.litersMax) / 2)
     : null;
 
+  const reorderTiles = (from: TileId, to: TileId) => {
+    if (from === to) return;
+    setTileOrder((prev) => {
+      const nextOrder = [...prev];
+      const fi = nextOrder.indexOf(from);
+      const ti = nextOrder.indexOf(to);
+      if (fi < 0 || ti < 0) return prev;
+      nextOrder.splice(fi, 1);
+      nextOrder.splice(ti, 0, from);
+      saveTileOrder(nextOrder);
+      return nextOrder;
+    });
+  };
+
+  const tileDnD = (id: TileId) => ({
+    dragging: dragId === id,
+    dragOver: overId === id && dragId !== id,
+    onDragStart: (e: DragEvent) => {
+      didDrag.current = false;
+      setDragId(id);
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', id);
+    },
+    onDragOver: (e: DragEvent) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      didDrag.current = true;
+      if (overId !== id) setOverId(id);
+    },
+    onDragLeave: () => {
+      if (overId === id) setOverId(null);
+    },
+    onDrop: (e: DragEvent) => {
+      e.preventDefault();
+      const from = (e.dataTransfer.getData('text/plain') as TileId) || dragId;
+      if (from) reorderTiles(from, id);
+      setDragId(null);
+      setOverId(null);
+    },
+    onDragEnd: () => {
+      setDragId(null);
+      setOverId(null);
+    },
+  });
+
+  const toggleTodayTimeFmt = () => {
+    if (didDrag.current) return;
+    setTodayTimeFmt((prev) => {
+      const nextFmt: TodayTimeFormat = prev === 'min' ? 'hm' : 'min';
+      saveTodayTimeFormat(nextFmt);
+      return nextFmt;
+    });
+  };
+
+  const tiles: Record<TileId, ReactNode> = {
+    watering_now: (
+      <InfoTile
+        key="watering_now"
+        label={t('Watering now')}
+        value={String(state?.active.length ?? 0)}
+        sub={state?.queue.length ? t('{n} queued', { n: state.queue.length }) : undefined}
+        icon={<IconDroplet size={22} />}
+        color="teal"
+        {...tileDnD('watering_now')}
+      />
+    ),
+    zones: (
+      <InfoTile
+        key="zones"
+        label={t('Zones')}
+        value={`${(zones ?? []).filter((z) => z.enabled).length}/${zones?.length ?? 0}`}
+        sub={t('enabled / total')}
+        icon={<IconPlant2 size={22} />}
+        color="green"
+        {...tileDnD('zones')}
+      />
+    ),
+    groups: (
+      <InfoTile
+        key="groups"
+        label={t('Groups')}
+        value={String(groups?.length ?? 0)}
+        sub={t('{n} enabled', { n: (groups ?? []).filter((g) => g.enabled).length })}
+        icon={<IconCategory size={22} />}
+        color="violet"
+        {...tileDnD('groups')}
+      />
+    ),
+    today_water: (
+      <InfoTile
+        key="today_water"
+        label={t('Today water')}
+        value={litersToday !== null ? t('{n} L', { n: litersToday }) : '—'}
+        icon={<IconBucketDroplet size={22} />}
+        color="blue"
+        {...tileDnD('today_water')}
+      />
+    ),
+    today_time: (
+      <InfoTile
+        key="today_time"
+        label={t('Today time')}
+        value={today ? formatTodayMinutes(today.totals.minutes, todayTimeFmt) : '—'}
+        sub={todayTimeFmt === 'hm' ? t('hours + minutes') : t('minutes')}
+        icon={<IconClockHour4 size={22} />}
+        color="orange"
+        clickable
+        onClick={toggleTodayTimeFmt}
+        {...tileDnD('today_time')}
+      />
+    ),
+    next_watering: (
+      <InfoTile
+        key="next_watering"
+        label={t('Next watering')}
+        value={next[0] ? countdown(next[0].ts) : '—'}
+        sub={
+          next[0]
+            ? `${new Date(next[0].ts).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })} · ${next[0].groupName}`
+            : undefined
+        }
+        icon={<IconCalendarClock size={22} />}
+        color="grape"
+        {...tileDnD('next_watering')}
+      />
+    ),
+  };
+
   return (
     <Stack>
       <SimpleGrid cols={{ base: 2, xs: 3, md: 6 }}>
-        <InfoTile
-          label={t('Watering now')}
-          value={String(state?.active.length ?? 0)}
-          sub={state?.queue.length ? t('{n} queued', { n: state.queue.length }) : undefined}
-          icon={<IconDroplet size={22} />}
-          color="teal"
-        />
-        <InfoTile
-          label={t('Zones')}
-          value={`${(zones ?? []).filter((z) => z.enabled).length}/${zones?.length ?? 0}`}
-          sub={t('enabled / total')}
-          icon={<IconPlant2 size={22} />}
-          color="green"
-        />
-        <InfoTile
-          label={t('Groups')}
-          value={String(groups?.length ?? 0)}
-          sub={t('{n} enabled', { n: (groups ?? []).filter((g) => g.enabled).length })}
-          icon={<IconCategory size={22} />}
-          color="violet"
-        />
-        <InfoTile
-          label={t('Today water')}
-          value={litersToday !== null ? t('{n} L', { n: litersToday }) : '—'}
-          icon={<IconBucketDroplet size={22} />}
-          color="blue"
-        />
-        <InfoTile
-          label={t('Today time')}
-          value={today ? t('{n} min', { n: Math.round(today.totals.minutes) }) : '—'}
-          icon={<IconClockHour4 size={22} />}
-          color="orange"
-        />
-        <InfoTile
-          label={t('Next watering')}
-          value={next[0] ? countdown(next[0].ts) : '—'}
-          sub={next[0] ? `${new Date(next[0].ts).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })} · ${next[0].groupName}` : undefined}
-          icon={<IconCalendarClock size={22} />}
-          color="grape"
-        />
+        {tileOrder.map((id) => tiles[id])}
       </SimpleGrid>
       <Grid>
         <Grid.Col span={{ base: 12, md: 7 }}>

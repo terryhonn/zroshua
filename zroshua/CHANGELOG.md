@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.2
+
+- **Dashboard tiles are draggable.** Reorder Watering now / Zones / Groups /
+  Today water / Today time / Next watering by drag-and-drop; order is stored
+  in the browser and survives restarts.
+- **Today time click-to-toggle.** Tap the tile to switch between total minutes
+  and hours + minutes (e.g. `2 hrs, 23 min`); preference is persisted.
+
 ## 0.4.1
 
 - **Dashboard layout:** Upcoming waterings sit under **Now** (left column,
