@@ -152,7 +152,25 @@ export interface EngineState {
     triggeredBy: string;
     progress: number;
   }[];
-  queue: { zoneId: string; zoneName: string; groupId: string | null; durationMin: number; waitReason: string }[];
+  queue: {
+    key?: string;
+    zoneId: string;
+    zoneName: string;
+    groupId: string | null;
+    durationMin: number;
+    waitReason: string;
+    manual?: boolean;
+    seqIndex?: number;
+  }[];
+  /** Sequential manual runs waiting after the current manual watering. */
+  manualQueue?: {
+    key: string;
+    zoneId: string;
+    zoneName: string;
+    durationMin: number;
+    position: number;
+    waitReason: string;
+  }[];
   faults: string[];
   pumpStates: { sourceId: string; name: string; on: boolean }[];
   sourceLevels?: { sourceId: string; name: string; capacityL: number; levelL: number | null; levelPct: number | null }[];

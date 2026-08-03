@@ -76,6 +76,21 @@ export class ActionsController {
     return this.engine.startZoneManual(id, body?.minutes);
   }
 
+  /** Remove a waiting entry from the sequential manual queue (by key from snapshot.manualQueue). */
+  @Post('manual-queue/remove')
+  async removeManualQueue(@Body() body: { key: string }) {
+    if (!body?.key) throw new BadRequestException('key required');
+    await this.engine.removeManualQueueItem(body.key);
+    return { ok: true };
+  }
+
+  /** Clear all waiting manual-queue items (does not stop the zone currently watering). */
+  @Post('manual-queue/clear')
+  async clearManualQueue() {
+    await this.engine.clearManualQueue();
+    return { ok: true };
+  }
+
   @Post('zones/:id/stop')
   async stopZone(@Param('id') id: string) {
     await this.engine.stopZone(id, 'manual_stop');

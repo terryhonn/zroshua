@@ -114,10 +114,25 @@ export default function ZonesPage({ state }: { state: EngineState | null }) {
   const startRun = async () => {
     if (!runZone) return;
     try {
-      const res = await api.post<{ warnings: string[] }>(`/zones/${runZone.id}/run`, { minutes: runMinutes });
+      const res = await api.post<{ warnings?: string[]; queued?: boolean }>(`/zones/${runZone.id}/run`, {
+        minutes: runMinutes,
+      });
+      if (res.queued) {
+        notifications.show({
+          message: t('Queued "{name}" for {minutes} min (manual queue)', {
+            name: runZone.name,
+            minutes: runMinutes,
+          }),
+          color: 'blue',
+        });
+      } else {
+        notifications.show({
+          message: t('Watering "{name}" for {minutes} min', { name: runZone.name, minutes: runMinutes }),
+          color: 'teal',
+        });
+      }
       if (res.warnings?.length)
         notifications.show({ title: t('Started with warnings'), message: res.warnings.join('; '), color: 'yellow' });
-      else notifications.show({ message: t('Watering "{name}" for {minutes} min', { name: runZone.name, minutes: runMinutes }), color: 'teal' });
       setRunZone(null);
     } catch (e) {
       notifyErr(e);
@@ -390,9 +405,9 @@ export default function ZonesPage({ state }: { state: EngineState | null }) {
         <Stack>
           <SliderInput label={t('Duration')} value={runMinutes} onChange={setRunMinutes} min={1} max={runZone?.maxRuntimeMin ?? 120} />
           <Text size="xs" c="dimmed">
-            {t('Manual runs always start (rain sensor / weather are ignored) and switch off automatically when the timer ends.')}
+            {t('Manual runs ignore rain / weather / pause. If another manual zone is already watering, this one joins the sequential manual queue (see Dashboard).')}
           </Text>
-          <Button onClick={startRun}>{t('Start')}</Button>
+          <Button onClick={startRun}>{t('Start / queue')}</Button>
         </Stack>
       </Modal>
     </Stack>

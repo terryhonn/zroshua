@@ -8,6 +8,7 @@ import {
   Modal,
   Progress,
   ScrollArea,
+  Select,
   Stack,
   Text,
   Title,
@@ -30,6 +31,8 @@ import {
   IconBucketDroplet,
   IconClockHour4,
   IconCalendarClock,
+  IconTrash,
+  IconListNumbers,
 } from '@tabler/icons-react';
 import { notifications } from '@mantine/notifications';
 import { api, EngineState, Group as ZGroup, Settings, Upcoming, WeatherNow, Zone } from '../api';
@@ -232,6 +235,9 @@ export default function DashboardPage({ state, journalTick = 0 }: { state: Engin
   };
   const [snoozeOpen, setSnoozeOpen] = useState(false);
   const [hours, setHours] = useState(24);
+  const [addQueueOpen, setAddQueueOpen] = useState(false);
+  const [addZoneId, setAddZoneId] = useState<string | null>(null);
+  const [addMinutes, setAddMinutes] = useState(15);
   const [tileOrder, setTileOrder] = useState<TileId[]>(loadTileOrder);
   const [todayTimeFmt, setTodayTimeFmt] = useState<TodayTimeFormat>(loadTodayTimeFormat);
   const [dragId, setDragId] = useState<TileId | null>(null);
@@ -653,6 +659,105 @@ export default function DashboardPage({ state, journalTick = 0 }: { state: Engin
                 </Stack>
               )}
             </Card>
+
+            <Card withBorder>
+              <Group justify="space-between" mb="sm" wrap="wrap">
+                <Title order={4}>{t('Manual queue')}</Title>
+                <Group gap="xs">
+                  {(state?.manualQueue?.length ?? 0) > 0 && (
+                    <Button
+                      size="xs"
+                      variant="subtle"
+                      color="red"
+                      onClick={() => act(() => api.post('/manual-queue/clear'), t('Manual queue cleared'))}
+                    >
+                      {t('Clear queue')}
+                    </Button>
+                  )}
+                  <Button
+                    size="xs"
+                    variant="light"
+                    leftSection={<IconPlus size={14} />}
+                    onClick={() => {
+                      const first = (zones ?? []).find((z) => z.enabled);
+                      setAddZoneId(first?.id ?? null);
+                      setAddMinutes(Math.round(first?.baseDurationMin ?? 15));
+                      setAddQueueOpen(true);
+                    }}
+                  >
+                    {t('Add zone')}
+                  </Button>
+                </Group>
+              </Group>
+              <Text size="xs" c="dimmed" mb="sm">
+                {t('Start a zone manually, then queue more to run one after another. Adjust duration for this run only.')}
+              </Text>
+              {(() => {
+                const runningManual = (state?.active ?? []).filter((a) => a.manual);
+                const waiting = state?.manualQueue ?? [];
+                if (!runningManual.length && !waiting.length) {
+                  return <Text size="sm" c="dimmed">{t('No manual runs queued. Use Add zone or Water now on a zone.')}</Text>;
+                }
+                return (
+                  <Stack gap="xs">
+                    {runningManual.map((a) => (
+                      <Group key={`run-${a.zoneId}`} justify="space-between" wrap="nowrap" gap="xs">
+                        <Group gap="xs" style={{ minWidth: 0 }}>
+                          <Badge size="sm" color="teal" variant="light" leftSection={<IconDroplet size={12} />}>
+                            {t('running')}
+                          </Badge>
+                          <Text size="sm" fw={600} truncate>
+                            {a.zoneName}
+                          </Text>
+                        </Group>
+                        <Group gap={4} wrap="nowrap">
+                          <Text size="xs" c="dimmed">
+                            {fmtDur(a.plannedMin)} · {t('ends {time}', { time: fmtTime(a.endsAt) })}
+                          </Text>
+                          <ActionIcon
+                            size="sm"
+                            color="red"
+                            variant="light"
+                            title={t('Stop')}
+                            onClick={() => act(() => api.post(`/zones/${a.zoneId}/stop`), t('Stopped'))}
+                          >
+                            <IconPlayerStop size={14} />
+                          </ActionIcon>
+                        </Group>
+                      </Group>
+                    ))}
+                    {waiting.map((q) => (
+                      <Group key={q.key} justify="space-between" wrap="nowrap" gap="xs">
+                        <Group gap="xs" style={{ minWidth: 0 }}>
+                          <Badge size="sm" color="gray" variant="light" leftSection={<IconListNumbers size={12} />}>
+                            #{q.position}
+                          </Badge>
+                          <Text size="sm" truncate>
+                            {q.zoneName}
+                          </Text>
+                        </Group>
+                        <Group gap={4} wrap="nowrap">
+                          <Text size="xs" c="dimmed">
+                            {fmtDur(q.durationMin)}
+                          </Text>
+                          <ActionIcon
+                            size="sm"
+                            color="red"
+                            variant="subtle"
+                            title={t('Remove from queue')}
+                            onClick={() =>
+                              act(() => api.post('/manual-queue/remove', { key: q.key }), t('Removed from queue'))
+                            }
+                          >
+                            <IconTrash size={14} />
+                          </ActionIcon>
+                        </Group>
+                      </Group>
+                    ))}
+                  </Stack>
+                );
+              })()}
+            </Card>
           </Stack>
         </Grid.Col>
       </Grid>
@@ -721,6 +826,72 @@ export default function DashboardPage({ state, journalTick = 0 }: { state: Engin
               {t('Resume now')}
             </Button>
           </Group>
+        </Stack>
+      </Modal>
+
+      <Modal opened={addQueueOpen} onClose={() => setAddQueueOpen(false)} title={t('Add zone to manual queue')}>
+        <Stack>
+          <Select
+            label={t('Zone')}
+            searchable
+            data={(zones ?? [])
+              .filter((z) => z.enabled)
+              .map((z) => ({ value: z.id, label: z.name }))}
+            value={addZoneId}
+            onChange={(v) => {
+              setAddZoneId(v);
+              const z = (zones ?? []).find((x) => x.id === v);
+              if (z) setAddMinutes(Math.round(z.baseDurationMin));
+            }}
+          />
+          <SliderInput
+            label={t('Duration for this run')}
+            value={addMinutes}
+            onChange={setAddMinutes}
+            min={1}
+            max={
+              Math.max(
+                1,
+                Math.round((zones ?? []).find((z) => z.id === addZoneId)?.maxRuntimeMin ?? 120),
+              )
+            }
+          />
+          <Text size="xs" c="dimmed">
+            {t('Default is the zone’s configured duration. If a manual run is already active, this zone waits in the sequential queue.')}
+          </Text>
+          <Button
+            disabled={!addZoneId}
+            onClick={async () => {
+              if (!addZoneId) return;
+              try {
+                const res = await api.post<{
+                  warnings?: string[];
+                  queued?: boolean;
+                  durationMin?: number;
+                }>(`/zones/${addZoneId}/run`, { minutes: addMinutes });
+                const zname = (zones ?? []).find((z) => z.id === addZoneId)?.name ?? addZoneId;
+                if (res.queued) {
+                  notifications.show({
+                    message: t('Queued "{name}" for {minutes} min', { name: zname, minutes: addMinutes }),
+                    color: 'blue',
+                  });
+                } else {
+                  notifications.show({
+                    message: t('Watering "{name}" for {minutes} min', { name: zname, minutes: addMinutes }),
+                    color: 'teal',
+                  });
+                }
+                if (res.warnings?.length) {
+                  notifications.show({ title: t('Started with warnings'), message: res.warnings.join('; '), color: 'yellow' });
+                }
+                setAddQueueOpen(false);
+              } catch (e: any) {
+                notifications.show({ message: e.message, color: 'red' });
+              }
+            }}
+          >
+            {t('Add / start')}
+          </Button>
         </Stack>
       </Modal>
     </Stack>

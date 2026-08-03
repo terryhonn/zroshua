@@ -116,6 +116,8 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
   /** Global pause: skip all automatic runs until this ms timestamp. Manual runs ignore it. */
   snoozeUntil = 0;
   paused = false;
+  /** Active sequential manual chain (`manual-seq:<ts>`); reused while manual work is outstanding. */
+  private currentManualChainId: string | null = null;
 
   constructor(
     @Inject(DATA_SOURCE) ds: DataSource,
@@ -806,28 +808,90 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
     return segments;
   }
 
+  /**
+   * Manual watering with an optional sequential queue.
+   * - If nothing is already running/queued as a manual run → starts immediately.
+   * - Otherwise the zone is appended to the manual chain and runs after prior
+   *   manual zones finish (one at a time). Duration defaults to the zone's
+   *   configured base duration; override with `minutes` for this run only.
+   */
   async startZoneManual(zoneId: string, minutes?: number) {
     const zone = this.zone(zoneId);
     if (!zone) throw new Error('zone not found');
-    if (this.active.some((a) => a.zoneId === zoneId) || this.startingZones.has(zoneId))
-      throw new Error('zone is already running');
+    if (
+      this.active.some((a) => a.zoneId === zoneId) ||
+      this.startingZones.has(zoneId) ||
+      this.pendingStarts.some((p) => p.zoneId === zoneId) ||
+      this.queue.some((q) => q.zoneId === zoneId)
+    )
+      throw new Error('zone is already running or queued');
+
     const duration = Math.min(minutes ?? zone.baseDurationMin, zone.maxRuntimeMin || 1e9);
     const warnings = this.hydraulicWarnings(zone);
-    // manual runs always start: bypass queue and constraints entirely
-    await this.startRun({
-      key: `manual:${zoneId}:${Date.now()}`,
+    const now = Date.now();
+    const busyManual =
+      this.active.some((a) => a.manual) ||
+      this.pendingStarts.some((p) => p.manual) ||
+      this.queue.some((q) => q.manual);
+
+    if (!this.currentManualChainId || !busyManual) {
+      this.currentManualChainId = `manual-seq:${now}`;
+    }
+    const chainId = this.currentManualChainId;
+    const seqIndex =
+      this.queue.filter((q) => q.groupRunId === chainId).length +
+      this.active.filter((a) => a.groupRunId === chainId).length +
+      this.pendingStarts.filter((p) => p.groupRunId === chainId).length;
+
+    const item: QueuedRun = {
+      key: `manual:${zoneId}:${now}`,
       zoneId,
       groupId: null,
-      groupRunId: null,
-      seqIndex: 0,
+      groupRunId: chainId,
+      seqIndex,
       durationMin: duration,
       manual: true,
       triggeredBy: 'manual',
       priority: 1000,
-      enqueuedAt: Date.now(),
+      enqueuedAt: now,
       notBefore: 0,
+      waitReason: busyManual ? 'manual queue: waiting for previous zone' : undefined,
+    };
+
+    if (!busyManual) {
+      // First manual in the chain: start immediately (still ignores rain/weather/pause).
+      await this.startRun(item);
+      return { warnings, queued: false, position: 0, durationMin: duration };
+    }
+
+    this.queue.push(item);
+    await this.journal.add('info', {
+      zoneId,
+      code: 'manual_queued',
+      detail: `queued for ${duration.toFixed(1)} min (position ${seqIndex + 1} in manual chain)`,
     });
-    return { warnings };
+    this.broadcastState();
+    return { warnings, queued: true, position: seqIndex, durationMin: duration };
+  }
+
+  /** Remove one waiting manual-queue entry by key (does not stop an active run). */
+  async removeManualQueueItem(key: string) {
+    const before = this.queue.length;
+    this.queue = this.queue.filter((q) => !(q.manual && q.key === key));
+    if (this.queue.length === before) throw new Error('queue item not found');
+    if (!this.queue.some((q) => q.manual) && !this.active.some((a) => a.manual) && !this.pendingStarts.some((p) => p.manual)) {
+      this.currentManualChainId = null;
+    }
+    this.broadcastState();
+  }
+
+  /** Drop all waiting manual-queue items (active manual run continues until stopped). */
+  async clearManualQueue() {
+    this.queue = this.queue.filter((q) => !q.manual);
+    if (!this.active.some((a) => a.manual) && !this.pendingStarts.some((p) => p.manual)) {
+      this.currentManualChainId = null;
+    }
+    this.broadcastState();
   }
 
   hydraulicWarnings(zone: Zone): string[] {
@@ -915,6 +979,14 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
     if (this.startingZones.has(zone.id) || this.active.some((a) => a.zoneId === zone.id))
       return { ok: false, reason: 'zone already running' };
     if (!zone.entities.every((e) => this.ha.available(e))) return { ok: false, reason: 'entity unavailable' };
+
+    // Sequential manual chain: only one zone from the chain runs at a time.
+    if (q.manual && q.groupRunId?.startsWith('manual-seq:')) {
+      const activeInChain =
+        this.active.filter((a) => a.groupRunId === q.groupRunId).length +
+        this.pendingStarts.filter((p) => p.groupRunId === q.groupRunId).length;
+      if (activeInChain > 0) return { ok: false, reason: 'manual queue: waiting for previous zone' };
+    }
 
     const groupRun = q.groupRunId ? this.groupRuns.get(q.groupRunId) : null;
     const group = this.group(q.groupId);
@@ -1112,6 +1184,7 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
     if (reason === 'manual_stop') {
       this.queue = [];
       this.groupRuns.clear();
+      this.currentManualChainId = null;
       this.broadcastState();
     }
   }
@@ -1213,6 +1286,15 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
       }
     } else {
       await this.notify.emit('run_end', `✅ Watering finished: "${zone?.name ?? run.zoneId}", ${actualMin.toFixed(0)} min.${nextTxt}`);
+    }
+    // Clear manual chain id when the sequential manual queue is empty
+    if (
+      run.manual &&
+      !this.active.some((a) => a.manual) &&
+      !this.pendingStarts.some((p) => p.manual) &&
+      !this.queue.some((q) => q.manual)
+    ) {
+      this.currentManualChainId = null;
     }
     this.broadcastState();
   }
@@ -2280,12 +2362,27 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
         progress: Math.min(1, (now - a.startTs) / Math.max(1, a.endsAt - a.startTs)),
       })),
       queue: this.queue.map((q) => ({
+        key: q.key,
         zoneId: q.zoneId,
         zoneName: this.zone(q.zoneId)?.name ?? q.zoneId,
         groupId: q.groupId,
         durationMin: q.durationMin,
+        manual: q.manual,
+        seqIndex: q.seqIndex,
         waitReason: q.waitReason ?? (q.notBefore > now ? 'waiting for delay/soak' : 'queued'),
       })),
+      /** Waiting manual sequential chain (same items as queue where manual=true). */
+      manualQueue: this.queue
+        .filter((q) => q.manual)
+        .sort((a, b) => a.seqIndex - b.seqIndex || a.enqueuedAt - b.enqueuedAt)
+        .map((q, i) => ({
+          key: q.key,
+          zoneId: q.zoneId,
+          zoneName: this.zone(q.zoneId)?.name ?? q.zoneId,
+          durationMin: q.durationMin,
+          position: i + 1,
+          waitReason: q.waitReason ?? 'manual queue',
+        })),
       faults: [...this.faultZones],
       pumpStates: this.sources
         .filter((s) => s.pumpEntity)

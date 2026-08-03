@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.3
+
+- **Sequential manual queue.** Starting a zone manually while another manual
+  run is active appends it to a chain that waters one zone after another.
+  Duration can be set for this run only (default = zone base duration). Dashboard
+  shows the queue under Quick actions (add / remove / clear). APIs:
+  `POST /zones/:id/run`, `POST /manual-queue/remove`, `POST /manual-queue/clear`.
+
 ## 0.4.2
 
 - **Dashboard tiles are draggable.** Reorder Watering now / Zones / Groups /
