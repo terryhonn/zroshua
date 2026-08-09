@@ -177,6 +177,7 @@ export interface EngineState {
 }
 
 export type TempUnit = 'C' | 'F';
+export type VolumeUnit = 'L' | 'gal';
 
 export interface Settings {
   maxTotalFlowLpm: number | null;
@@ -184,6 +185,11 @@ export interface Settings {
   energyCurrency: string | null;
   /** Display/input unit for temperatures; thresholds are always stored as °C. */
   tempUnit: TempUnit;
+  /**
+   * Display/input unit for water volume and flow; values are always stored as
+   * liters / L/min. Gallons are US liquid gallons.
+   */
+  volumeUnit: VolumeUnit;
   conflictPolicy: 'wait' | 'skip';
   weatherEntity: string | null;
   rainSensor: {

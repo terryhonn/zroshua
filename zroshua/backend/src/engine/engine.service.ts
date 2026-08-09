@@ -10,6 +10,7 @@ import { WeatherService } from '../weather/weather.service';
 import { EventsService } from '../events/events.service';
 import { inSeason, occurrences } from './planner';
 import { formatTempC } from '../units/temp';
+import { formatFlowLpm, formatVolumeL, haFlowToLpm, VolumeUnit } from '../units/volume';
 
 const TICK_MS = 1000;
 const CHECKBACK_WAIT_MS = 6000;
@@ -400,7 +401,7 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
         else expected += typeof f === 'number' ? f : (f.min + f.max) / 2;
       }
       if (unknown || expected <= 0) continue;
-      const actual = this.ha.numeric(src.flowSensor);
+      const actual = this.flowSensorLpm(src.flowSensor);
       if (actual === null) continue;
       const devPct = (Math.abs(actual - expected) / expected) * 100;
       if (devPct < src.flowDeviationPct) {
@@ -412,13 +413,14 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
       if (now - (this.flowDevAlertedAt.get(src.id) ?? 0) < 3600_000) continue; // 1 alert/hour
       this.flowDevAlertedAt.set(src.id, now);
       const dir = actual > expected ? 'HIGHER (possible burst pipe)' : 'LOWER (clogged emitters / low pressure?)';
+      const volUnit: VolumeUnit = (await this.config.getSettings()).volumeUnit === 'gal' ? 'gal' : 'L';
       await this.journal.add('fault', {
         code: 'flow_deviation',
-        detail: `${src.name}: measured ${actual.toFixed(1)} l/min vs expected ${expected.toFixed(1)} l/min`,
+        detail: `${src.name}: measured ${formatFlowLpm(actual, volUnit)} vs expected ${formatFlowLpm(expected, volUnit)}`,
       });
       await this.notify.emit(
         'fault',
-        `💦 Flow on "${src.name}" is ${Math.round(devPct)}% ${dir}: measured ${actual.toFixed(1)} l/min, expected ${expected.toFixed(1)} l/min (${running.length} zone(s) running).`,
+        `💦 Flow on "${src.name}" is ${Math.round(devPct)}% ${dir}: measured ${formatFlowLpm(actual, volUnit)}, expected ${formatFlowLpm(expected, volUnit)} (${running.length} zone(s) running).`,
       );
     }
   }
@@ -449,13 +451,14 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
     const minutes = runs.reduce((acc, r) => acc + (r.endTs && r.startTs ? (r.endTs - r.startTs) / 60_000 : 0), 0);
     const skips = await this.journal.countToday('skip');
     const faults = await this.journal.countToday('fault');
+    const volUnit: VolumeUnit = settings.volumeUnit === 'gal' ? 'gal' : 'L';
     const cost =
       settings.energyTariffPerKwh != null ? ` (~${(kwh * settings.energyTariffPerKwh).toFixed(2)} ${settings.energyCurrency ?? ''})` : '';
     await this.notify.emit(
       'system',
       `📊 Zroshua daily digest ${today}\n` +
         `Runs: ${runs.length} · ${Math.round(minutes)} min\n` +
-        `Water: ~${Math.round(liters)} L\n` +
+        `Water: ~${formatVolumeL(liters, volUnit)}\n` +
         `Pump energy: ${kwh.toFixed(2)} kWh${cost}\n` +
         `Skips: ${skips} · Faults: ${faults}`,
     );
@@ -1277,7 +1280,8 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
     } else if (groupLevel) {
       if (groupFinished) {
         const g = this.group(run.groupId);
-        const liters = groupFinished.liters ? ` · ~${Math.round(groupFinished.liters)} L` : '';
+        const volUnit: VolumeUnit = (await this.config.getSettings()).volumeUnit === 'gal' ? 'gal' : 'L';
+        const liters = groupFinished.liters ? ` · ~${formatVolumeL(groupFinished.liters, volUnit)}` : '';
         const wall = groupFinished.startTs ? (now - groupFinished.startTs) / 60_000 : groupFinished.totalMin ?? 0;
         await this.notify.emit(
           'run_end',
@@ -1572,18 +1576,30 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
       if (!src.flowSensor || !src.idleFlowAlertLpm) continue;
       const busy = this.active.some((a) => a.sourceId === src.id);
       if (busy) continue;
-      const flow = this.ha.numeric(src.flowSensor);
+      const flow = this.flowSensorLpm(src.flowSensor);
       if (flow !== null && flow > src.idleFlowAlertLpm) {
         const last = this.lastIdleFlowAlert.get(src.id) ?? 0;
         if (now - last < 30 * 60_000) continue;
         this.lastIdleFlowAlert.set(src.id, now);
+        const volUnit: VolumeUnit = (await this.config.getSettings()).volumeUnit === 'gal' ? 'gal' : 'L';
         await this.journal.add('fault', {
           code: 'idle_flow',
-          detail: `source ${src.name}: ${flow} l/min with no zones running (leak or stuck valve?)`,
+          detail: `source ${src.name}: ${formatFlowLpm(flow, volUnit)} with no zones running (leak or stuck valve?)`,
         });
-        await this.notify.emit('fault', `🚨 Source "${src.name}": water is flowing (${flow} l/min) while no zones are running — possible leak or stuck valve.`);
+        await this.notify.emit(
+          'fault',
+          `🚨 Source "${src.name}": water is flowing (${formatFlowLpm(flow, volUnit)}) while no zones are running — possible leak or stuck valve.`,
+        );
       }
     }
+  }
+
+  /** Read a flow sensor and normalize to L/min (HA may report gal/min / GPM). */
+  private flowSensorLpm(entityId: string): number | null {
+    const st = this.ha.getState(entityId);
+    const v = this.ha.numeric(entityId);
+    if (v === null) return null;
+    return haFlowToLpm(v, st?.attributes?.unit_of_measurement ?? null);
   }
 
   // ---------------------------------------------------------------- energy

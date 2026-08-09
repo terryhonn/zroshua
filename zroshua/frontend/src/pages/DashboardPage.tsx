@@ -39,7 +39,7 @@ import { api, EngineState, Group as ZGroup, Settings, Upcoming, WeatherNow, Zone
 import { fmtDur, fmtTime, useJournal, useResource } from '../hooks';
 import { t, locale } from '../i18n';
 import { SliderInput } from '../components/common';
-import { formatTemp, TempUnit } from '../units';
+import { formatTemp, formatVolume, TempUnit, VolumeUnit } from '../units';
 
 const JOURNAL_KIND_COLORS: Record<string, string> = {
   run_start: 'teal',
@@ -205,6 +205,7 @@ export default function DashboardPage({ state, journalTick = 0 }: { state: Engin
   const { data: weather } = useResource<WeatherNow>('/weather');
   const { data: settings } = useResource<Settings>('/settings');
   const tempUnit: TempUnit = settings?.tempUnit === 'F' ? 'F' : 'C';
+  const volUnit: VolumeUnit = settings?.volumeUnit === 'gal' ? 'gal' : 'L';
   const { data: upcoming } = useResource<Upcoming[]>('/upcoming', [state?.active.length]);
   const { data: zones } = useResource<Zone[]>('/zones');
   const { data: groups } = useResource<ZGroup[]>('/groups');
@@ -264,7 +265,7 @@ export default function DashboardPage({ state, journalTick = 0 }: { state: Engin
 
   const next = (upcoming ?? []).filter((u) => u.ts > Date.now()).slice(0, 6);
   const litersToday = today
-    ? Math.round((today.totals.litersMin + today.totals.litersMax) / 2)
+    ? (today.totals.litersMin + today.totals.litersMax) / 2
     : null;
 
   const reorderTiles = (from: TileId, to: TileId) => {
@@ -359,7 +360,7 @@ export default function DashboardPage({ state, journalTick = 0 }: { state: Engin
       <InfoTile
         key="today_water"
         label={t('Today water')}
-        value={litersToday !== null ? t('{n} L', { n: litersToday }) : '—'}
+        value={litersToday !== null ? formatVolume(litersToday, volUnit) : '—'}
         icon={<IconBucketDroplet size={22} />}
         color="blue"
         {...tileDnD('today_water')}
@@ -646,7 +647,9 @@ export default function DashboardPage({ state, journalTick = 0 }: { state: Engin
                           {l.name}
                         </Text>
                         <Text size="xs" c="dimmed">
-                          {l.levelL !== null ? t('~{n} L ({pct}%)', { n: l.levelL, pct: String(l.levelPct) }) : '—'}
+                          {l.levelL !== null
+                            ? t('~{vol} ({pct}%)', { vol: formatVolume(l.levelL, volUnit), pct: String(l.levelPct) })
+                            : '—'}
                         </Text>
                       </Group>
                       <Progress

@@ -17,17 +17,23 @@ import {
 } from '@mantine/core';
 import { IconEdit, IconTrash } from '@tabler/icons-react';
 import { notifications } from '@mantine/notifications';
-import { api, Group as ZGroup, WaterSource } from '../api';
+import { api, Group as ZGroup, Settings, WaterSource } from '../api';
 import { useResource } from '../hooks';
 import { EntitySelect } from '../components/common';
 import { t } from '../i18n';
 import { HintLabel, HintTitle } from '../components/Hint';
+import { displayFlow, displayVolume, flowSuffix, toStoredL, VolumeUnit, volumeSuffix } from '../units';
 
 export default function SourcesPage() {
   const { data: sources, reload } = useResource<WaterSource[]>('/sources');
   const { data: groups } = useResource<ZGroup[]>('/groups');
+  const { data: settings } = useResource<Settings>('/settings');
   const [editing, setEditing] = useState<Partial<WaterSource> | null>(null);
   const notifyErr = (e: any) => notifications.show({ message: e.message, color: 'red' });
+
+  const volUnit: VolumeUnit = settings?.volumeUnit === 'gal' ? 'gal' : 'L';
+  const flowUnit = flowSuffix(volUnit);
+  const volSuf = volumeSuffix(volUnit);
 
   const save = async () => {
     if (!editing?.name) return;
@@ -55,7 +61,7 @@ export default function SourcesPage() {
               <Text fw={600}>{s.name}</Text>
               <Text size="sm" c="dimmed">
                 {{ well: t('well'), barrel: t('barrel'), mains: t('mains') }[s.type] ?? s.type}
-                {s.maxFlowLpm ? ` · ${t('budget {n} l/min', { n: s.maxFlowLpm })}` : ''}
+                {s.maxFlowLpm ? ` · ${t('budget {n} {unit}', { n: displayFlow(s.maxFlowLpm, volUnit), unit: flowUnit })}` : ''}
                 {s.dependsOn ? ` · ${t('depends on {name}', { name: sources?.find((x) => x.id === s.dependsOn)?.name ?? s.dependsOn })}` : ''}
                 {s.pumpEntity ? ` · ${t('pump')}` : ''}
                 {s.energyEntity ? ` · ${t('energy meter')}` : ''}
@@ -91,9 +97,11 @@ export default function SourcesPage() {
             </SimpleGrid>
             <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="xs" verticalSpacing="xs">
               <NumberInput
-                label={<HintLabel label={t('Max flow budget')} hint={t('l/min, empty = unlimited')} />}
-                value={editing.maxFlowLpm ?? ''}
-                onChange={(v) => setEditing({ ...editing, maxFlowLpm: v === '' ? null : Number(v) })}
+                label={<HintLabel label={t('Max flow budget')} hint={t('{unit}, empty = unlimited', { unit: flowUnit })} />}
+                suffix={` ${flowUnit}`}
+                value={editing.maxFlowLpm != null ? displayFlow(editing.maxFlowLpm, volUnit) : ''}
+                onChange={(v) => setEditing({ ...editing, maxFlowLpm: v === '' ? null : toStoredL(v, volUnit) })}
+                decimalScale={volUnit === 'gal' ? 2 : 1}
               />
               <Select
                 label={<HintLabel label={t('Depends on')} hint={t('blocked while that source runs')} />}
@@ -184,16 +192,22 @@ export default function SourcesPage() {
             />
             <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="xs" verticalSpacing="xs">
               <EntitySelect
-                label={<HintLabel label={t('Flow sensor')} hint={t('l/min, optional')} />}
+                label={
+                  <HintLabel
+                    label={t('Flow sensor')}
+                    hint={t('optional; L/min or gal/min — HA unit_of_measurement is used')}
+                  />
+                }
                 value={editing.flowSensor ?? null}
                 onChange={(v) => setEditing({ ...editing, flowSensor: v })}
                 domains={['sensor']}
               />
               <NumberInput
                 label={<HintLabel label={t('Idle flow')} hint={t('Idle-flow alert threshold')} />}
-                suffix={` ${t('l/min')}`}
-                value={editing.idleFlowAlertLpm ?? ''}
-                onChange={(v) => setEditing({ ...editing, idleFlowAlertLpm: v === '' ? null : Number(v) })}
+                suffix={` ${flowUnit}`}
+                value={editing.idleFlowAlertLpm != null ? displayFlow(editing.idleFlowAlertLpm, volUnit) : ''}
+                onChange={(v) => setEditing({ ...editing, idleFlowAlertLpm: v === '' ? null : toStoredL(v, volUnit) })}
+                decimalScale={volUnit === 'gal' ? 2 : 1}
               />
               <NumberInput
                 label={<HintLabel label={t('Flow deviation')} hint={t('Alert when measured flow differs from the running zones\' total')} />}
@@ -222,16 +236,23 @@ export default function SourcesPage() {
             />
             <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="xs" verticalSpacing="xs">
               <NumberInput
-                label={<HintLabel label={t('Capacity')} hint={t('Capacity (L) — enables barrel level tracking')} />}
-                suffix={` ${t('L')}`}
-                value={editing.capacityL ?? ''}
-                onChange={(v) => setEditing({ ...editing, capacityL: v === '' ? null : Number(v) })}
+                label={
+                  <HintLabel
+                    label={t('Capacity')}
+                    hint={t('Capacity ({unit}) — enables barrel level tracking', { unit: volSuf })}
+                  />
+                }
+                suffix={` ${volSuf}`}
+                value={editing.capacityL != null ? displayVolume(editing.capacityL, volUnit) : ''}
+                onChange={(v) => setEditing({ ...editing, capacityL: v === '' ? null : toStoredL(v, volUnit) })}
+                decimalScale={volUnit === 'gal' ? 1 : 0}
               />
               <NumberInput
-                label={<HintLabel label={t('Refill rate')} hint={t('l/min')} />}
-                suffix={` ${t('l/min')}`}
-                value={editing.refillLpm ?? ''}
-                onChange={(v) => setEditing({ ...editing, refillLpm: v === '' ? null : Number(v) })}
+                label={<HintLabel label={t('Refill rate')} hint={flowUnit} />}
+                suffix={` ${flowUnit}`}
+                value={editing.refillLpm != null ? displayFlow(editing.refillLpm, volUnit) : ''}
+                onChange={(v) => setEditing({ ...editing, refillLpm: v === '' ? null : toStoredL(v, volUnit) })}
+                decimalScale={volUnit === 'gal' ? 2 : 1}
               />
             </SimpleGrid>
             {editing.capacityL ? (

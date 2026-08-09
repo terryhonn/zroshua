@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.4
+
+- **Volume unit (liters / US gallons).** Settings → same card as Language and
+  Temperature: choose L or gal. Water totals, flow rates, barrel capacity and
+  MQTT water sensors convert for display and input; engine storage stays in
+  liters / L/min. Journal, digests, fault alerts and the Lovelace card follow
+  the preference. HA flow sensors that report gal/min / GPM are normalized
+  before leak and deviation checks.
+
 ## 0.4.3
 
 - **Sequential manual queue.** Starting a zone manually while another manual

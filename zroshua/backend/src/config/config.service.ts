@@ -39,6 +39,7 @@ export type NotificationProvider =
   | { type: 'ha_notify'; service: string; events: string[] };
 
 export type TempUnit = 'C' | 'F';
+export type VolumeUnit = 'L' | 'gal';
 
 export interface Settings {
   maxTotalFlowLpm: number | null;
@@ -49,6 +50,12 @@ export interface Settings {
    * Thresholds and engine comparisons are always stored and evaluated in °C.
    */
   tempUnit: TempUnit;
+  /**
+   * Display / input unit for water volume and flow in the UI, journal,
+   * notifications and MQTT sensors. Storage and engine math always use liters
+   * (and L/min). Gallons are US liquid gallons.
+   */
+  volumeUnit: VolumeUnit;
   /** wait = queue until rules allow (default); skip = drop a scheduled run that cannot start on time */
   conflictPolicy: 'wait' | 'skip';
   weatherEntity: string | null;
@@ -95,6 +102,7 @@ export const defaultSettings: Settings = {
   energyTariffPerKwh: null,
   energyCurrency: null,
   tempUnit: 'C',
+  volumeUnit: 'L',
   conflictPolicy: 'wait',
   weatherEntity: null,
   rainSensor: {

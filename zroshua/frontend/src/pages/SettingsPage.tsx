@@ -22,7 +22,7 @@ import { useResource } from '../hooks';
 import { EntitySelect, SliderInput } from '../components/common';
 import { LANG_OPTIONS, setLang, storedLang, t } from '../i18n';
 import { HintLabel, HintTitle } from '../components/Hint';
-import { TempUnit, displayTemp, tempSuffix, toStoredC } from '../units';
+import { TempUnit, VolumeUnit, displayFlow, displayTemp, flowSuffix, tempSuffix, toStoredC, toStoredL } from '../units';
 
 const EVENTS = [
   { value: 'run_start', label: t('Run started') },
@@ -71,7 +71,9 @@ export default function SettingsPage() {
   if (!s) return null;
 
   const unit: TempUnit = s.tempUnit === 'F' ? 'F' : 'C';
+  const volUnit: VolumeUnit = s.volumeUnit === 'gal' ? 'gal' : 'L';
   const deg = tempSuffix(unit);
+  const flowUnit = flowSuffix(volUnit);
 
   const save = async () => {
     try {
@@ -90,6 +92,19 @@ export default function SettingsPage() {
     try {
       await api.put('/settings', patched);
       notifications.show({ message: t('Temperature unit saved'), color: 'teal' });
+      reload();
+    } catch (e: any) {
+      notifications.show({ message: e.message, color: 'red' });
+    }
+  };
+
+  /** Persist volume unit immediately (same card as Language). */
+  const setVolumeUnit = async (next: VolumeUnit) => {
+    const patched = { ...s, volumeUnit: next };
+    setS(patched);
+    try {
+      await api.put('/settings', patched);
+      notifications.show({ message: t('Volume unit saved'), color: 'teal' });
       reload();
     } catch (e: any) {
       notifications.show({ message: e.message, color: 'red' });
@@ -157,6 +172,21 @@ export default function SettingsPage() {
             ]}
             value={unit}
             onChange={(v) => v && setTempUnit(v as TempUnit)}
+            comboboxProps={{ withinPortal: true }}
+          />
+          <Select
+            label={
+              <HintLabel
+                label={t('Volume unit')}
+                hint={t('Used for water totals, flow rates, barrel capacity and MQTT water sensors. Values are stored in liters / L/min internally; this only changes how they are shown and entered. Gallons are US liquid gallons.')}
+              />
+            }
+            data={[
+              { value: 'L', label: t('Liters (L)') },
+              { value: 'gal', label: t('US gallons (gal)') },
+            ]}
+            value={volUnit}
+            onChange={(v) => v && setVolumeUnit(v as VolumeUnit)}
             comboboxProps={{ withinPortal: true }}
           />
         </Group>
@@ -335,7 +365,7 @@ export default function SettingsPage() {
         </Title>
         <Stack>
           <Switch
-            label={<HintLabel label={t('One message per group run')} hint={t('A group start/finish summary (zones, time, liters) instead of a message per zone')} />}
+            label={<HintLabel label={t('One message per group run')} hint={t('A group start/finish summary (zones, time, water) instead of a message per zone')} />}
             checked={s.notifications.groupLevel ?? true}
             onChange={(e) => setS({ ...s, notifications: { ...s.notifications, groupLevel: e.currentTarget.checked } })}
           />
@@ -343,7 +373,7 @@ export default function SettingsPage() {
             <Switch
               style={{ minWidth: 240 }}
               pb={8}
-              label={<HintLabel label={t('Daily digest')} hint={t('Evening summary: runs, liters, energy, cost, skips')} />}
+              label={<HintLabel label={t('Daily digest')} hint={t('Evening summary: runs, water, energy, cost, skips')} />}
               checked={s.notifications.digest?.enabled ?? false}
               onChange={(e) =>
                 setS({ ...s, notifications: { ...s.notifications, digest: { ...s.notifications.digest, enabled: e.currentTarget.checked } } })
@@ -465,9 +495,11 @@ export default function SettingsPage() {
         <Stack>
           <Group grow>
             <NumberInput
-              label={<HintLabel label={t('Global max total flow')} hint={t('l/min, empty = off')} />}
-              value={s.maxTotalFlowLpm ?? ''}
-              onChange={(v) => setS({ ...s, maxTotalFlowLpm: v === '' ? null : Number(v) })}
+              label={<HintLabel label={t('Global max total flow')} hint={t('{unit}, empty = off', { unit: flowUnit })} />}
+              suffix={` ${flowUnit}`}
+              value={s.maxTotalFlowLpm != null ? displayFlow(s.maxTotalFlowLpm, volUnit) : ''}
+              onChange={(v) => setS({ ...s, maxTotalFlowLpm: v === '' ? null : toStoredL(v, volUnit) })}
+              decimalScale={volUnit === 'gal' ? 2 : 1}
             />
             <NumberInput
               label={<HintLabel label={t('Energy tariff per kWh')} hint={t('for cost stats')} />}

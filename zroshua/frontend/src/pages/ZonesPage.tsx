@@ -24,6 +24,14 @@ import { EntityMultiSelect, EntitySelect, SliderInput, PauseControl } from '../c
 import ScheduleEditor, { emptySchedule } from '../components/ScheduleEditor';
 import { BusyBand, overlapsConflict, toMin } from '../components/TimeSlotPicker';
 import { HintLabel, HintTitle } from '../components/Hint';
+import {
+  DEFAULT_FLOW_LPM,
+  DEFAULT_FLOW_RANGE_LPM,
+  displayFlow,
+  flowSuffix,
+  toStoredL,
+  VolumeUnit,
+} from '../units';
 
 const emptyZone: Partial<Zone> = {
   name: '',
@@ -55,8 +63,16 @@ export default function ZonesPage({ state }: { state: EngineState | null }) {
   const [flowMode, setFlowMode] = useState<'none' | 'value' | 'range'>('none');
   const [busy, setBusy] = useState<BusyBand[]>([]);
 
+  const volUnit: VolumeUnit = settings?.volumeUnit === 'gal' ? 'gal' : 'L';
+  const flowUnit = flowSuffix(volUnit);
+
   const running = new Set(state?.active.map((a) => a.zoneId));
   const faults = new Set(state?.faults ?? []);
+
+  const fmtFlow = (f: number | { min: number; max: number }) =>
+    typeof f === 'number'
+      ? String(displayFlow(f, volUnit))
+      : `${displayFlow(f.min, volUnit)}–${displayFlow(f.max, volUnit)}`;
 
   const notifyErr = (e: any) => notifications.show({ message: e.message, color: 'red' });
 
@@ -190,8 +206,7 @@ export default function ZonesPage({ state }: { state: EngineState | null }) {
             </Group>
             <Text size="sm" c="dimmed">
               {t(z.type)} · {fmtDur(z.baseDurationMin)}
-              {z.flowLpm != null &&
-                ` · ${t('{flow} l/min', { flow: typeof z.flowLpm === 'number' ? z.flowLpm : `${z.flowLpm.min}–${z.flowLpm.max}` })}`}
+              {z.flowLpm != null && ` · ${t('{flow} {unit}', { flow: fmtFlow(z.flowLpm), unit: flowUnit })}`}
               {z.sourceId && ` · ${sources?.find((s) => s.id === z.sourceId)?.name ?? z.sourceId}`}
             </Text>
             <Text size="xs" c="dimmed" lineClamp={1} style={{ wordBreak: 'break-all' }}>
@@ -289,38 +304,64 @@ export default function ZonesPage({ state }: { state: EngineState | null }) {
                 setFlowMode(mode);
                 setEditing({
                   ...editing,
-                  flowLpm: mode === 'none' ? null : mode === 'value' ? 10 : { min: 5, max: 15 },
+                  flowLpm: mode === 'none' ? null : mode === 'value' ? DEFAULT_FLOW_LPM : { ...DEFAULT_FLOW_RANGE_LPM },
                 });
               }}
             />
             {flowMode === 'value' && (
               <NumberInput
-                label={t('Flow (l/min)')}
-                value={typeof editing.flowLpm === 'number' ? editing.flowLpm : 10}
-                onChange={(v) => setEditing({ ...editing, flowLpm: Number(v) || 0 })}
+                label={t('Flow ({unit})', { unit: flowUnit })}
+                suffix={` ${flowUnit}`}
+                value={typeof editing.flowLpm === 'number' ? displayFlow(editing.flowLpm, volUnit) : displayFlow(DEFAULT_FLOW_LPM, volUnit)}
+                onChange={(v) => setEditing({ ...editing, flowLpm: toStoredL(v, volUnit) ?? 0 })}
+                decimalScale={volUnit === 'gal' ? 2 : 1}
               />
             )}
             {flowMode === 'range' && (
               <Group grow>
                 <NumberInput
-                  label={t('Flow min (l/min)')}
-                  value={typeof editing.flowLpm === 'object' && editing.flowLpm ? editing.flowLpm.min : 5}
+                  label={t('Flow min ({unit})', { unit: flowUnit })}
+                  suffix={` ${flowUnit}`}
+                  value={
+                    typeof editing.flowLpm === 'object' && editing.flowLpm
+                      ? displayFlow(editing.flowLpm.min, volUnit)
+                      : displayFlow(DEFAULT_FLOW_RANGE_LPM.min, volUnit)
+                  }
                   onChange={(v) =>
                     setEditing({
                       ...editing,
-                      flowLpm: { min: Number(v) || 0, max: typeof editing.flowLpm === 'object' && editing.flowLpm ? editing.flowLpm.max : 15 },
+                      flowLpm: {
+                        min: toStoredL(v, volUnit) ?? 0,
+                        max:
+                          typeof editing.flowLpm === 'object' && editing.flowLpm
+                            ? editing.flowLpm.max
+                            : DEFAULT_FLOW_RANGE_LPM.max,
+                      },
                     })
                   }
+                  decimalScale={volUnit === 'gal' ? 2 : 1}
                 />
                 <NumberInput
-                  label={t('Flow max (l/min)')}
-                  value={typeof editing.flowLpm === 'object' && editing.flowLpm ? editing.flowLpm.max : 15}
+                  label={t('Flow max ({unit})', { unit: flowUnit })}
+                  suffix={` ${flowUnit}`}
+                  value={
+                    typeof editing.flowLpm === 'object' && editing.flowLpm
+                      ? displayFlow(editing.flowLpm.max, volUnit)
+                      : displayFlow(DEFAULT_FLOW_RANGE_LPM.max, volUnit)
+                  }
                   onChange={(v) =>
                     setEditing({
                       ...editing,
-                      flowLpm: { min: typeof editing.flowLpm === 'object' && editing.flowLpm ? editing.flowLpm.min : 5, max: Number(v) || 0 },
+                      flowLpm: {
+                        min:
+                          typeof editing.flowLpm === 'object' && editing.flowLpm
+                            ? editing.flowLpm.min
+                            : DEFAULT_FLOW_RANGE_LPM.min,
+                        max: toStoredL(v, volUnit) ?? 0,
+                      },
                     })
                   }
+                  decimalScale={volUnit === 'gal' ? 2 : 1}
                 />
               </Group>
             )}

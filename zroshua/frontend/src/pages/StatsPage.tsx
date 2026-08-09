@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import { BarChart } from '@mantine/charts';
 import { Button, Card, Group, SegmentedControl, SimpleGrid, Stack, Text, Title } from '@mantine/core';
+import { Settings } from '../api';
 import { useResource } from '../hooks';
 import { t } from '../i18n';
+import { displayVolume, formatVolumeRange, VolumeUnit, volumeSuffix } from '../units';
 
 interface Daily {
   days: { day: string; minutes: number; litersMin: number; litersMax: number; energyKwh: number; tailKwh: number }[];
@@ -27,15 +29,13 @@ function StatTile({ label, value }: { label: string; value: string }) {
 export default function StatsPage() {
   const [days, setDays] = useState('30');
   const { data } = useResource<Daily>(`/stats/daily?days=${days}`, [days]);
-
-  const liters = (min: number, max: number) =>
-    min === max
-      ? t('{n} L', { n: Math.round(min) })
-      : t('{min}–{max} L', { min: Math.round(min), max: Math.round(max) });
+  const { data: settings } = useResource<Settings>('/settings');
+  const volUnit: VolumeUnit = settings?.volumeUnit === 'gal' ? 'gal' : 'L';
+  const volLabel = volUnit === 'gal' ? t('gallons') : t('liters');
 
   const chartData = (data?.days ?? []).map((d) => ({
     day: d.day.slice(5),
-    liters: Math.round((d.litersMin + d.litersMax) / 2),
+    volume: displayVolume((d.litersMin + d.litersMax) / 2, volUnit),
     minutes: Math.round(d.minutes),
     kWh: Number((d.energyKwh + d.tailKwh).toFixed(2)),
   }));
@@ -63,7 +63,7 @@ export default function StatsPage() {
       <SimpleGrid cols={{ base: 2, sm: 4 }}>
         <StatTile
           label={t('Water (calculated)')}
-          value={data ? liters(data.totals.litersMin, data.totals.litersMax) : '—'}
+          value={data ? formatVolumeRange(data.totals.litersMin, data.totals.litersMax, volUnit) : '—'}
         />
         <StatTile label={t('Watering time')} value={data ? t('{n} min', { n: Math.round(data.totals.minutes) }) : '—'} />
         <StatTile
@@ -84,13 +84,13 @@ export default function StatsPage() {
 
       <Card withBorder>
         <Title order={5} mb="sm">
-          {t('Liters per day (average of range)')}
+          {t('{unit} per day (average of range)', { unit: volumeSuffix(volUnit) === 'gal' ? t('Gallons') : t('Liters') })}
         </Title>
         <BarChart
           h={220}
           data={chartData}
           dataKey="day"
-          series={[{ name: 'liters', label: t('liters'), color: 'blue.6' }]}
+          series={[{ name: 'volume', label: volLabel, color: 'blue.6' }]}
         />
       </Card>
       <Card withBorder>

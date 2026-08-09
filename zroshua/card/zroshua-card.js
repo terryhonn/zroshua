@@ -214,7 +214,7 @@ class ZroshuaCard extends HTMLElement {
         <div class="tiles">
           ${tile('Watering', String((a.active || []).length), I.drop, 'ok')}
           ${tile('Queued', String((a.queue || []).length), I.queue, 'warn')}
-          ${tile('Today', `${a.litersToday ?? 0} L`, I.sprinkler, 'idle')}
+          ${tile('Today', `${a.litersToday ?? 0} ${a.volumeUnit === 'gal' ? 'gal' : 'L'}`, I.sprinkler, 'idle')}
           ${tile('Next', next ? this._countdown(next.ts) : '—', I.clock, 'accent')}
         </div>
         <div class="sec">Now</div>

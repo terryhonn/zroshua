@@ -6,6 +6,7 @@ import { Run, Zone } from '../db/entities';
 import { ConfigService } from '../config/config.service';
 import { EngineService } from '../engine/engine.service';
 import { env } from '../env';
+import { fromStoredL, VolumeUnit } from '../units/volume';
 import { ADDON_VERSION } from '../version';
 
 const AVAIL_TOPIC = 'zroshua/status';
@@ -136,6 +137,9 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
   private async publishDiscovery() {
     if (!this.client?.connected) return;
     const zones = await this.config.zones.find();
+    const settings = await this.config.getSettings();
+    const volUnit: VolumeUnit = settings.volumeUnit === 'gal' ? 'gal' : 'L';
+    const waterUom = volUnit === 'gal' ? 'gal' : 'L';
     const common = { availability_topic: AVAIL_TOPIC, device: this.device() };
     const current = new Set<string>();
 
@@ -194,7 +198,7 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
           ...common,
           name: `${s.name} water today`,
           unique_id: sid,
-          unit_of_measurement: 'L',
+          unit_of_measurement: waterUom,
           device_class: 'water',
           state_class: 'total_increasing',
           icon: 'mdi:water-pump',
@@ -232,7 +236,7 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
         {
           name: 'Water today',
           object_id: 'zroshua_water_today', // pin entity_id to sensor.zroshua_water_today
-          unit_of_measurement: 'L',
+          unit_of_measurement: waterUom,
           device_class: 'water',
           state_class: 'total_increasing',
           icon: 'mdi:water',
@@ -303,7 +307,10 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
       .getMany();
     const liters = rows.reduce((acc, r) => acc + ((r.litersMin ?? 0) + (r.litersMax ?? 0)) / 2, 0);
     const kwh = rows.reduce((acc, r) => acc + (r.energyKwh ?? 0), 0);
-    this.pub('zroshua/stats/liters_today', liters.toFixed(1));
+    const settings = await this.config.getSettings();
+    const volUnit: VolumeUnit = settings.volumeUnit === 'gal' ? 'gal' : 'L';
+    const pubVol = (l: number) => fromStoredL(l, volUnit).toFixed(1);
+    this.pub('zroshua/stats/liters_today', pubVol(liters));
     this.pub('zroshua/stats/energy_today', kwh.toFixed(3));
 
     // per-source breakdown; runs of zones without a source count only toward the total
@@ -314,18 +321,18 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
       litersBySource.set(r.sourceId, (litersBySource.get(r.sourceId) ?? 0) + ((r.litersMin ?? 0) + (r.litersMax ?? 0)) / 2);
     }
     for (const s of sources) {
-      this.pub(`zroshua/source/${s.id}/liters_today`, (litersBySource.get(s.id) ?? 0).toFixed(1));
+      this.pub(`zroshua/source/${s.id}/liters_today`, pubVol(litersBySource.get(s.id) ?? 0));
       if (s.capacityL) {
         const lvl = this.engine.sourceLevelL(s.id);
         if (lvl !== null) this.pub(`zroshua/source/${s.id}/level`, String(Math.round((lvl / s.capacityL) * 100)));
       }
     }
 
-    await this.publishHub(snapshot, zones, liters, kwh);
+    await this.publishHub(snapshot, zones, liters, kwh, volUnit);
   }
 
   /** Full snapshot for the Lovelace card: compact state + rich json attributes. */
-  private async publishHub(snapshot: any, zones: Zone[], litersToday: number, kwhToday: number) {
+  private async publishHub(snapshot: any, zones: Zone[], litersToday: number, kwhToday: number, volUnit: VolumeUnit = 'L') {
     const groups = await this.config.groups.find({ order: { orderIndex: 'ASC' } });
     const settings = await this.config.getSettings();
     const activeZoneIds = new Set(snapshot.active.map((a: any) => a.zoneId));
@@ -363,12 +370,15 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
       w: e.worstEnd,
     }));
 
+    const waterToday = fromStoredL(litersToday, volUnit);
     const attrs = {
       updated: new Date().toISOString(),
       paused: snapshot.paused,
       snoozeUntil: snapshot.snoozeUntil,
       haConnected: snapshot.haConnected,
-      litersToday: Math.round(litersToday),
+      /** Display-unit volume for today (L or gal per volumeUnit). */
+      litersToday: volUnit === 'gal' ? Math.round(waterToday * 10) / 10 : Math.round(waterToday),
+      volumeUnit: volUnit,
       kwhToday: +kwhToday.toFixed(2),
       currency: settings.energyCurrency,
       active: snapshot.active,
