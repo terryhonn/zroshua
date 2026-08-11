@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.5
+
+- **Fault check-back tuned for ESPHome.** Wait after each switch command is
+  15 s (was 6 s); still 3 attempts. Stuck-valve escalation turns **all** zone
+  entities off (not only the first) and **clears the zone fault** when the
+  valve is confirmed closed (`stuck_recovered`).
+- **Fix: manual Water now `run_end` notifications** when “One message per group
+  run” is on (group-level mode only applies to real watering groups).
+
 ## 0.4.4
 
 - **Volume unit (liters / US gallons).** Settings → same card as Language and

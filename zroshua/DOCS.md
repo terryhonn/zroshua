@@ -152,9 +152,11 @@ the run is skipped with a journal reason).
 
 ## Fault control
 
-- Check-back after every command: a zone that fails to turn **on** is skipped (the rest of
-  the plan continues) and reported. A zone that fails to turn **off** triggers escalation:
-  pump shutdown, repeated retries and a critical notification.
+- Check-back after every command (3 attempts × 15 s poll, suited to ESPHome / Wi‑Fi valves):
+  a zone that fails to turn **on** is skipped (the rest of the plan continues) and reported.
+  A zone that fails to turn **off** triggers escalation: pump shutdown, up to 20 background
+  retries (all zone entities, every 15 s), and a critical notification. When escalation
+  sees the valve closed again, the zone fault is cleared automatically.
 - Independent per-zone max-runtime failsafe.
 - Zones switched on outside Zroshua are either adopted as manual runs (with auto-off) or
   switched off, per your policy.

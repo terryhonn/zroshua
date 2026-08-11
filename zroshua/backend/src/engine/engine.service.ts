@@ -13,8 +13,12 @@ import { formatTempC } from '../units/temp';
 import { formatFlowLpm, formatVolumeL, haFlowToLpm, VolumeUnit } from '../units/volume';
 
 const TICK_MS = 1000;
-const CHECKBACK_WAIT_MS = 6000;
+/** Wait for HA state after each command (ESPHome / Wi‑Fi valves need more than a few seconds). */
+const CHECKBACK_WAIT_MS = 15_000;
 const CHECKBACK_RETRIES = 3;
+/** Background retries after a stuck-open valve (OFF check-back already failed). */
+const STUCK_ESCALATE_MAX = 20;
+const STUCK_ESCALATE_INTERVAL_MS = 15_000;
 
 interface QueuedRun {
   key: string;
@@ -1315,16 +1319,30 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
     const retry = async () => {
       attempts++;
       try {
-        await this.ha.turn(zone.entities[0], false);
+        for (const e of zone.entities) {
+          try {
+            await this.ha.turn(e, false);
+          } catch (err: any) {
+            this.log.warn(`stuck escalate turn_off ${e}: ${err.message}`);
+          }
+        }
         await new Promise((r) => setTimeout(r, CHECKBACK_WAIT_MS));
         if (!zone.entities.some((e) => this.ha.isOn(e))) {
-          await this.journal.add('info', { zoneId: zone.id, code: 'stuck_recovered', detail: `recovered after ${attempts} retries` });
+          this.faultZones.delete(zone.id);
+          await this.journal.add('info', {
+            zoneId: zone.id,
+            code: 'stuck_recovered',
+            detail: `recovered after ${attempts} retries — fault cleared`,
+          });
+          this.broadcastState();
           return;
         }
-      } catch { /* keep retrying */ }
-      if (attempts < 20) setTimeout(retry, 15_000);
+      } catch {
+        /* keep retrying */
+      }
+      if (attempts < STUCK_ESCALATE_MAX) setTimeout(retry, STUCK_ESCALATE_INTERVAL_MS);
     };
-    setTimeout(retry, 15_000);
+    setTimeout(retry, STUCK_ESCALATE_INTERVAL_MS);
   }
 
   private async switchWithCheckback(zone: Zone, on: boolean): Promise<boolean> {
