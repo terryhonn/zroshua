@@ -1274,7 +1274,14 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
       code: reason,
       detail: `${actualMin.toFixed(1)} min`,
     });
-    const groupLevel = run.groupRunId && (await this.config.getSettings()).notifications.groupLevel;
+    // Group-level digests only apply to real watering groups (groupId set).
+    // Manual runs also carry a groupRunId (`manual-seq:…`) for the sequential
+    // queue, but they are never registered in groupRuns — requiring groupId
+    // avoids swallowing per-zone run_end for "Water now" / manual chain stops.
+    const groupLevel =
+      !!run.groupId &&
+      !!run.groupRunId &&
+      (await this.config.getSettings()).notifications.groupLevel;
     if (reason === 'rain') {
       await this.notify.emit('stop_rain', `🌧 Watering of "${zone?.name ?? run.zoneId}" stopped: rain detected.`);
     } else if (groupLevel) {
