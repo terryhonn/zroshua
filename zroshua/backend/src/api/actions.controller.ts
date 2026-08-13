@@ -4,6 +4,7 @@ import { ConfigService } from '../config/config.service';
 import { WeatherService } from '../weather/weather.service';
 import { JournalService } from '../journal/journal.service';
 import { MqttService } from '../mqtt/mqtt.service';
+import { NotifyService } from '../notify/notify.service';
 import { ADDON_VERSION } from '../version';
 
 @Controller('api')
@@ -14,6 +15,7 @@ export class ActionsController {
     private readonly weather: WeatherService,
     private readonly journal: JournalService,
     private readonly mqtt: MqttService,
+    private readonly notify: NotifyService,
   ) {}
 
   @Get('mqtt-status')
@@ -153,5 +155,24 @@ export class ActionsController {
   pause(@Body() body: { paused: boolean }) {
     this.engine.paused = !!body?.paused;
     return { ok: true, paused: this.engine.paused };
+  }
+
+  /** Send today's digest now, labelled as a test. Does not consume the daily slot. */
+  @Post('notifications/test-digest')
+  testDigest() {
+    return this.engine.sendDigest({ test: true });
+  }
+
+  /** Ping a single HA notify service (the one typed in Settings, even if not saved). */
+  @Post('notifications/test-ha')
+  async testHa(@Body() body: { service?: string }) {
+    const service = String(body?.service ?? '').trim();
+    if (!service) return { ok: false, reason: 'Notify service is empty' };
+    try {
+      await this.notify.testHa(service);
+      return { ok: true, service };
+    } catch (e: any) {
+      return { ok: false, reason: e.message ?? 'HA notify failed' };
+    }
   }
 }

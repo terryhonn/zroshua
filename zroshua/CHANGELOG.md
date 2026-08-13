@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.4.6
+
+- **Fix: daily digest never arriving.** Three delivery bugs stacked: the
+  digest was emitted as a `system` event so a provider whose event filter
+  listed only watering/faults dropped it; quiet hours swallowed it when
+  the digest time sat inside the window; and `lastDigestDate` was written
+  *before* send, so a suppressed or failed attempt burned the day with no
+  retry. The digest now goes to every provider, ignores quiet hours, and
+  is marked sent only after a provider accepts it. The date in the message
+  is the local calendar day (was UTC, so evenings in the Americas showed
+  tomorrow).
+- **Test buttons** on Settings → Notifications: *Send test digest* delivers
+  today's totals immediately (labelled TEST, does not burn the daily slot)
+  and *Test notify* pings a single HA `notify.*` service.
+
 ## 0.4.5
 
 - **Fault check-back tuned for ESPHome.** Wait after each switch command is

@@ -20,6 +20,14 @@ const CHECKBACK_RETRIES = 3;
 const STUCK_ESCALATE_MAX = 20;
 const STUCK_ESCALATE_INTERVAL_MS = 15_000;
 
+/** Local YYYY-MM-DD. `toISOString().slice(0, 10)` is UTC and flips date all evening west of UTC. */
+function localDateKey(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 interface QueuedRun {
   key: string;
   zoneId: string;
@@ -253,10 +261,18 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
 
     if (now - this.lastSoilCheck > 60_000) {
       this.lastSoilCheck = now;
-      await this.checkSoilTriggers(now);
-      await this.checkTempTriggers(now);
-      await this.weather.trackLocalTemperature();
-      await this.maybeSendDigest(now);
+      try {
+        await this.checkSoilTriggers(now);
+        await this.checkTempTriggers(now);
+        await this.weather.trackLocalTemperature();
+      } catch (e: any) {
+        this.log.warn(`periodic checks failed: ${e.message}`);
+      }
+      try {
+        await this.maybeSendDigest(now);
+      } catch (e: any) {
+        this.log.warn(`daily digest failed: ${e.message}`);
+      }
     }
     if (now - this.lastFlowCheck > 60_000) {
       this.lastFlowCheck = now;
@@ -436,13 +452,58 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
     const digest = settings.notifications.digest;
     if (!digest?.enabled) return;
     const d = new Date(now);
+    // <input type="time"> may persist "21:00:00"; toTimeString is always "HH:MM:SS …".
+    // Compare HH:MM only — "21:00" < "21:00:00" is true and would skip the whole minute.
     const hhmm = d.toTimeString().slice(0, 5);
-    if (hhmm < digest.time) return;
-    const today = d.toISOString().slice(0, 10);
-    const last = await this.config.getKV<string>('lastDigestDate', '');
+    const when = (digest.time ?? '21:00').slice(0, 5);
+    if (!when || hhmm < when) return;
+    const today = localDateKey(d);
+    const last = await this.config.getKV<string>('lastDigestSentOn', '');
     if (last === today) return;
-    await this.config.setKV('lastDigestDate', today);
+    await this.sendDigest({ now });
+  }
 
+  /**
+   * Build and send today's digest. A test send uses the same totals but is
+   * labelled TEST and does not consume the once-per-day slot.
+   */
+  async sendDigest(opts: { test?: boolean; now?: number } = {}): Promise<{
+    ok: boolean;
+    sent: number;
+    attempted: number;
+    reason?: string;
+  }> {
+    const now = opts.now ?? Date.now();
+    const test = !!opts.test;
+    const settings = await this.config.getSettings();
+    const today = localDateKey(new Date(now));
+    const message = await this.composeDigest(now, settings, today, test);
+    const result = await this.notify.emit('digest', message);
+    if (result.sent > 0) {
+      if (!test) {
+        await this.config.setKV('lastDigestSentOn', today);
+        await this.journal.add('info', { code: 'daily_digest', detail: message.replace(/\n/g, ' · ') });
+        this.log.log(`Daily digest sent to ${result.sent} provider(s)`);
+      } else {
+        await this.journal.add('info', { code: 'digest_test', detail: `test sent to ${result.sent} provider(s)` });
+        this.log.log(`Test digest sent to ${result.sent} provider(s)`);
+      }
+      return { ok: true, sent: result.sent, attempted: result.attempted };
+    }
+    const reason =
+      result.attempted === 0
+        ? 'No notification providers are configured'
+        : 'Every provider failed — check add-on logs';
+    this.log.warn(`Daily digest${test ? ' (test)' : ''}: ${reason}`);
+    return { ok: false, sent: 0, attempted: result.attempted, reason };
+  }
+
+  private async composeDigest(
+    now: number,
+    settings: Awaited<ReturnType<ConfigService['getSettings']>>,
+    today: string,
+    test: boolean,
+  ): Promise<string> {
     const dayStart = new Date(now);
     dayStart.setHours(0, 0, 0, 0);
     const rows = await this.runsRepo
@@ -450,7 +511,7 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
       .where('r.startTs >= :from AND r.endTs IS NOT NULL', { from: dayStart.getTime() })
       .getMany();
     const runs = rows.filter((r) => r.category !== 'tail');
-    const liters = rows.reduce((acc, r) => acc + (((r.litersMin ?? 0) + (r.litersMax ?? 0)) / 2), 0);
+    const liters = rows.reduce((acc, r) => acc + ((r.litersMin ?? 0) + (r.litersMax ?? 0)) / 2, 0);
     const kwh = rows.reduce((acc, r) => acc + (r.energyKwh ?? 0), 0);
     const minutes = runs.reduce((acc, r) => acc + (r.endTs && r.startTs ? (r.endTs - r.startTs) / 60_000 : 0), 0);
     const skips = await this.journal.countToday('skip');
@@ -458,14 +519,13 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
     const volUnit: VolumeUnit = settings.volumeUnit === 'gal' ? 'gal' : 'L';
     const cost =
       settings.energyTariffPerKwh != null ? ` (~${(kwh * settings.energyTariffPerKwh).toFixed(2)} ${settings.energyCurrency ?? ''})` : '';
-    await this.notify.emit(
-      'system',
+    const body =
       `📊 Zroshua daily digest ${today}\n` +
-        `Runs: ${runs.length} · ${Math.round(minutes)} min\n` +
-        `Water: ~${formatVolumeL(liters, volUnit)}\n` +
-        `Pump energy: ${kwh.toFixed(2)} kWh${cost}\n` +
-        `Skips: ${skips} · Faults: ${faults}`,
-    );
+      `Runs: ${runs.length} · ${Math.round(minutes)} min\n` +
+      `Water: ~${formatVolumeL(liters, volUnit)}\n` +
+      `Pump energy: ${kwh.toFixed(2)} kWh${cost}\n` +
+      `Skips: ${skips} · Faults: ${faults}`;
+    return test ? `🧪 TEST digest — not the scheduled send\n${body}` : body;
   }
 
   /**

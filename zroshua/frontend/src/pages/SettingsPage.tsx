@@ -63,6 +63,7 @@ export default function SettingsPage() {
   const { data: groups } = useResource<ZGroup[]>('/groups');
   const { data: health } = useResource<{ ok: boolean; version?: string }>('/health');
   const [s, setS] = useState<Settings | null>(null);
+  const [testing, setTesting] = useState<string | null>(null);
 
   useEffect(() => {
     if (settings) setS(settings);
@@ -128,6 +129,40 @@ export default function SettingsPage() {
       reload();
     } catch (e: any) {
       notifications.show({ message: e.message, color: 'red' });
+    }
+  };
+
+  const testDigest = async () => {
+    setTesting('digest');
+    try {
+      await api.put('/settings', s);
+      reload();
+      const res = await api.post<{ ok: boolean; sent: number; attempted: number; reason?: string }>('/notifications/test-digest');
+      if (res.ok) {
+        notifications.show({ message: t('Test digest sent to {n} provider(s)', { n: res.sent }), color: 'teal' });
+      } else {
+        notifications.show({ message: res.reason ?? t('Test digest was not delivered'), color: 'red' });
+      }
+    } catch (e: any) {
+      notifications.show({ message: e.message, color: 'red' });
+    } finally {
+      setTesting(null);
+    }
+  };
+
+  const testHa = async (service: string, key: string) => {
+    setTesting(key);
+    try {
+      const res = await api.post<{ ok: boolean; reason?: string; service?: string }>('/notifications/test-ha', { service });
+      if (res.ok) {
+        notifications.show({ message: t('Test sent to {service}', { service: res.service ?? service }), color: 'teal' });
+      } else {
+        notifications.show({ message: res.reason ?? t('HA notify test failed'), color: 'red' });
+      }
+    } catch (e: any) {
+      notifications.show({ message: e.message, color: 'red' });
+    } finally {
+      setTesting(null);
     }
   };
 
@@ -373,7 +408,7 @@ export default function SettingsPage() {
             <Switch
               style={{ minWidth: 240 }}
               pb={8}
-              label={<HintLabel label={t('Daily digest')} hint={t('Evening summary: runs, water, energy, cost, skips')} />}
+              label={<HintLabel label={t('Daily digest')} hint={t('Evening summary sent to every provider at this time. Not blocked by quiet hours or the event filter.')} />}
               checked={s.notifications.digest?.enabled ?? false}
               onChange={(e) =>
                 setS({ ...s, notifications: { ...s.notifications, digest: { ...s.notifications.digest, enabled: e.currentTarget.checked } } })
@@ -387,15 +422,23 @@ export default function SettingsPage() {
               value={s.notifications.digest?.time ?? '21:00'}
               onChange={(e) =>
                 e.target.value &&
-                setS({ ...s, notifications: { ...s.notifications, digest: { ...s.notifications.digest, time: e.target.value } } })
+                setS({ ...s, notifications: { ...s.notifications, digest: { ...s.notifications.digest, time: e.target.value.slice(0, 5) } } })
               }
             />
+            <Button
+              variant="light"
+              disabled={testing !== null}
+              loading={testing === 'digest'}
+              onClick={testDigest}
+            >
+              {t('Send test digest')}
+            </Button>
           </Group>
           <Group align="flex-end" wrap="wrap" gap="md">
             <Switch
               style={{ minWidth: 240 }}
               pb={8}
-              label={<HintLabel label={t('Quiet hours')} hint={t('Suppress all but fault alerts in this window')} />}
+              label={<HintLabel label={t('Quiet hours')} hint={t('Suppress all but fault alerts and the daily digest in this window')} />}
               checked={s.notifications.quiet?.enabled ?? false}
               onChange={(e) =>
                 setS({ ...s, notifications: { ...s.notifications, quiet: { ...s.notifications.quiet, enabled: e.currentTarget.checked } } })
@@ -443,14 +486,25 @@ export default function SettingsPage() {
                   onChange={(e) => setProvider(i, { chatIds: e.target.value.split(',').map((x) => x.trim()).filter(Boolean) } as any)}
                 />
               ) : (
-                <TextInput
-                  label={<HintLabel label={t('Notify service')} hint={t('e.g. notify.mobile_app_phone')} />}
-                  value={p.service}
-                  onChange={(e) => setProvider(i, { service: e.target.value } as any)}
-                />
+                <Group align="flex-end" wrap="wrap" gap="sm">
+                  <TextInput
+                    style={{ flex: 1, minWidth: 220 }}
+                    label={<HintLabel label={t('Notify service')} hint={t('e.g. notify.mobile_app_phone')} />}
+                    value={p.service}
+                    onChange={(e) => setProvider(i, { service: e.target.value } as any)}
+                  />
+                  <Button
+                    variant="light"
+                    disabled={!p.service?.trim() || testing !== null}
+                    loading={testing === `ha:${i}`}
+                    onClick={() => testHa(p.service, `ha:${i}`)}
+                  >
+                    {t('Test notify')}
+                  </Button>
+                </Group>
               )}
               <MultiSelect
-                label={<HintLabel label={t('Events')} hint={t('empty = all')} />}
+                label={<HintLabel label={t('Events')} hint={t('empty = all realtime events. The daily digest is always sent when enabled.')} />}
                 data={EVENTS}
                 value={p.events}
                 onChange={(v) => setProvider(i, { events: v } as any)}

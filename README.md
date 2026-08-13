@@ -299,8 +299,10 @@ trigger, updates the zone but leaves the group as it was.
   its own event filter — started, finished (duration + time to next run), skipped (with
   reason), stopped by rain, faults, system. **Group-level mode** collapses a sequential run
   of 13 beds into two messages (started / finished with totals) instead of 26; a **daily
-  digest** at a chosen time sums up runs, liters, energy, cost and skips; **quiet hours**
-  hold everything except faults during the night.
+  digest** at a chosen time sums up runs, liters, energy, cost and skips (sent to every
+  provider; not blocked by quiet hours or event filters — Settings has a **Send test
+  digest** button, plus **Test notify** on each HA provider); **quiet hours**
+  hold everything except faults and the digest during the night.
 - **External switch policy**: a zone turned on outside Zroshua is either adopted as a manual
   run (auto-off) or switched back off.
 - **Backup**: export/import the whole configuration as JSON.

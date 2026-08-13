@@ -203,9 +203,14 @@ system events.
   message per zone. Rain stops and faults stay per-zone; standalone zone runs are
   unaffected.
 - **Daily digest**: one message at a chosen time with the day's totals — runs, minutes,
-  liters, energy (and cost with a tariff), skips and faults.
+  liters, energy (and cost with a tariff), skips and faults. Sent to **every** configured
+  provider (the per-provider event filter does not apply). Not suppressed by quiet hours.
+  **Send test digest** fires today's totals immediately (labelled TEST) without consuming
+  the daily slot.
+- **Test notify** on an HA provider pings that `notify.*` service so you can confirm the
+  phone / TTS / persistent notification is wired before waiting for a real event.
 - **Quiet hours**: inside the window (may wrap past midnight) everything except **faults**
-  is suppressed.
+  and the **daily digest** is suppressed.
 
 ## Lovelace cards
 

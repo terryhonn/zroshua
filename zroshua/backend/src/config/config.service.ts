@@ -89,7 +89,7 @@ export interface Settings {
     groupLevel: boolean;
     /** daily summary (liters/energy/cost/skips) at a fixed time */
     digest: { enabled: boolean; time: string };
-    /** suppress non-fault notifications inside this window (digest still covers them) */
+    /** suppress non-fault notifications inside this window (digest is not suppressed) */
     quiet: { enabled: boolean; from: string; to: string };
   };
   externalOnPolicy: 'adopt' | 'turn_off';
