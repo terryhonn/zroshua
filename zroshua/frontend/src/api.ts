@@ -162,7 +162,7 @@ export interface EngineState {
     manual?: boolean;
     seqIndex?: number;
   }[];
-  /** Sequential manual runs waiting after the current manual watering. */
+  /** Sequential manual runs waiting after the current watering (manual or scheduled). */
   manualQueue?: {
     key: string;
     zoneId: string;

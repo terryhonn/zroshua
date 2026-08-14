@@ -446,7 +446,7 @@ export default function ZonesPage({ state }: { state: EngineState | null }) {
         <Stack>
           <SliderInput label={t('Duration')} value={runMinutes} onChange={setRunMinutes} min={1} max={runZone?.maxRuntimeMin ?? 120} />
           <Text size="xs" c="dimmed">
-            {t('Manual runs ignore rain / weather / pause. If another manual zone is already watering, this one joins the sequential manual queue (see Dashboard).')}
+            {t('Manual runs ignore rain / weather / pause. If any zone is already watering (manual or scheduled), this one waits in the sequential queue until it finishes.')}
           </Text>
           <Button onClick={startRun}>{t('Start / queue')}</Button>
         </Stack>

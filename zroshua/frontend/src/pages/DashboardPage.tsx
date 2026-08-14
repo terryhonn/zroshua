@@ -693,21 +693,25 @@ export default function DashboardPage({ state, journalTick = 0 }: { state: Engin
                 </Group>
               </Group>
               <Text size="xs" c="dimmed" mb="sm">
-                {t('Start a zone manually, then queue more to run one after another. Adjust duration for this run only.')}
+                {t('Start a zone manually, then queue more to run one after another. A queued zone waits until whatever is currently watering (manual or scheduled) finishes. Adjust duration for this run only.')}
               </Text>
               {(() => {
-                const runningManual = (state?.active ?? []).filter((a) => a.manual);
                 const waiting = state?.manualQueue ?? [];
-                if (!runningManual.length && !waiting.length) {
+                // While something is waiting, show every active zone as the head
+                // of the line (including a scheduled run the queue is yielding to).
+                const runningHead = waiting.length
+                  ? (state?.active ?? [])
+                  : (state?.active ?? []).filter((a) => a.manual);
+                if (!runningHead.length && !waiting.length) {
                   return <Text size="sm" c="dimmed">{t('No manual runs queued. Use Add zone or Water now on a zone.')}</Text>;
                 }
                 return (
                   <Stack gap="xs">
-                    {runningManual.map((a) => (
+                    {runningHead.map((a) => (
                       <Group key={`run-${a.zoneId}`} justify="space-between" wrap="nowrap" gap="xs">
                         <Group gap="xs" style={{ minWidth: 0 }}>
                           <Badge size="sm" color="teal" variant="light" leftSection={<IconDroplet size={12} />}>
-                            {t('running')}
+                            {a.manual ? t('running') : t('scheduled')}
                           </Badge>
                           <Text size="sm" fw={600} truncate>
                             {a.zoneName}
@@ -742,6 +746,7 @@ export default function DashboardPage({ state, journalTick = 0 }: { state: Engin
                         <Group gap={4} wrap="nowrap">
                           <Text size="xs" c="dimmed">
                             {fmtDur(q.durationMin)}
+                            {q.waitReason ? ` · ${q.waitReason}` : ''}
                           </Text>
                           <ActionIcon
                             size="sm"
@@ -860,7 +865,7 @@ export default function DashboardPage({ state, journalTick = 0 }: { state: Engin
             }
           />
           <Text size="xs" c="dimmed">
-            {t('Default is the zone’s configured duration. If a manual run is already active, this zone waits in the sequential queue.')}
+            {t('Default is the zone’s configured duration. If any zone is already watering (manual or scheduled), this one waits until it finishes.')}
           </Text>
           <Button
             disabled={!addZoneId}

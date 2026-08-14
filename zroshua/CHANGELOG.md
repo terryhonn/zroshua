@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.7
+
+- **Manual queue waits for the zone that is already watering.** Adding a
+  zone (Water now / Add zone / MQTT) while any other zone is running —
+  scheduled or manual — now queues it until that run finishes, instead of
+  starting in parallel. The dashboard shows the active scheduled zone as
+  the head of the line while the queue yields.
+
 ## 0.4.6
 
 - **Fix: daily digest never arriving.** Three delivery bugs stacked: the

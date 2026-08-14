@@ -79,7 +79,9 @@ and applies instantly without restarts.
   depend on start-time data are marked *may skip*.
 - Manual runs: one tap, preset duration adjustable with a slider before or during the run,
   guaranteed auto-off. Manual always starts — rain/weather are ignored, hydraulic
-  violations only warn.
+  violations only warn. If another zone is already watering (a scheduled run or a
+  previous manual), the new zone joins the sequential manual queue and waits until
+  that watering finishes.
 - **Zone-level schedules**: a zone can carry its own schedules in addition to its group —
   useful when one bed needs watering more often. Such runs are single-zone but still obey
   the group's rules, flow budgets, rain/soil sensors and weather scaling.
