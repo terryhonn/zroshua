@@ -210,10 +210,10 @@ export default function DashboardPage({ state, journalTick = 0 }: { state: Engin
   const { data: zones } = useResource<Zone[]>('/zones');
   const { data: groups } = useResource<ZGroup[]>('/groups');
   const journal = useJournal(journalTick);
-  const { data: today } = useResource<{ totals: { minutes: number; litersMin: number; litersMax: number } }>(
-    '/stats/daily?days=1',
-    [state?.active.length],
-  );
+  const { data: today } = useResource<{
+    days: { day: string; minutes: number; litersMin: number; litersMax: number }[];
+    totals: { minutes: number; litersMin: number; litersMax: number };
+  }>('/stats/daily?days=1', [state?.active.length]);
 
   const nameOf = (zoneId: string | null, groupId: string | null) => {
     if (zoneId) return zones?.find((z) => z.id === zoneId)?.name ?? zoneId;
@@ -264,9 +264,17 @@ export default function DashboardPage({ state, journalTick = 0 }: { state: Engin
   };
 
   const next = (upcoming ?? []).filter((u) => u.ts > Date.now()).slice(0, 6);
-  const litersToday = today
-    ? (today.totals.litersMin + today.totals.litersMax) / 2
-    : null;
+  // Prefer today's local bucket (backend keys are local YYYY-MM-DD). Totals
+  // for days=1 is the same after the calendar-day fix; this stays correct if
+  // the window ever spans two keys.
+  const todayKey = (() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  })();
+  const todayRow = today?.days?.find((d) => d.day === todayKey) ?? (today ? { ...today.totals, day: todayKey } : null);
+  const liveMin = (state?.active ?? []).reduce((acc, a) => acc + Math.max(0, (nowTick - a.startTs) / 60_000), 0);
+  const minutesToday = todayRow ? todayRow.minutes + liveMin : null;
+  const litersToday = todayRow ? (todayRow.litersMin + todayRow.litersMax) / 2 : null;
 
   const reorderTiles = (from: TileId, to: TileId) => {
     if (from === to) return;
@@ -370,7 +378,7 @@ export default function DashboardPage({ state, journalTick = 0 }: { state: Engin
       <InfoTile
         key="today_time"
         label={t('Today time')}
-        value={today ? formatTodayMinutes(today.totals.minutes, todayTimeFmt) : '—'}
+        value={minutesToday !== null ? formatTodayMinutes(minutesToday, todayTimeFmt) : '—'}
         sub={todayTimeFmt === 'hm' ? t('hours + minutes') : t('minutes')}
         icon={<IconClockHour4 size={22} />}
         color="orange"

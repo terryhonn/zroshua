@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.8
+
+- **Fix: Today time / Today water counted the last 24 hours, not today.**
+  `/stats/daily?days=1` was a rolling window from now, so last night's
+  watering showed up on the morning dashboard (e.g. 15 h at 07:30). Days
+  were also keyed in UTC, so evening runs west of Greenwich landed on
+  tomorrow. Stats now use local calendar days from midnight, matching the
+  MQTT "water today" sensors.
+
 ## 0.4.7
 
 - **Manual queue waits for the zone that is already watering.** Adding a

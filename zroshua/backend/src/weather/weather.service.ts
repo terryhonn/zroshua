@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '../config/config.service';
 import { HaService } from '../ha/ha.service';
 import { formatTempC, haReadingToC } from '../units/temp';
+import { localDateKey } from '../units/date';
 
 export interface DayWeather {
   /** Always Celsius after normalization from HA. */
@@ -86,7 +87,7 @@ export class WeatherService {
     const value = this.ha.temperatureC(sensor);
     if (value === null) return;
     const key = 'tempTrack';
-    const today = new Date().toISOString().slice(0, 10);
+    const today = localDateKey();
     const track = await this.config.getKV<{ date: string; max: number; prevMax: number | null }>(key, {
       date: today,
       max: value,

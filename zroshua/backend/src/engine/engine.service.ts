@@ -11,6 +11,7 @@ import { EventsService } from '../events/events.service';
 import { inSeason, occurrences } from './planner';
 import { formatTempC } from '../units/temp';
 import { formatFlowLpm, formatVolumeL, haFlowToLpm, VolumeUnit } from '../units/volume';
+import { localDateKey } from '../units/date';
 
 const TICK_MS = 1000;
 /** Wait for HA state after each command (ESPHome / Wi‑Fi valves need more than a few seconds). */
@@ -19,14 +20,6 @@ const CHECKBACK_RETRIES = 3;
 /** Background retries after a stuck-open valve (OFF check-back already failed). */
 const STUCK_ESCALATE_MAX = 20;
 const STUCK_ESCALATE_INTERVAL_MS = 15_000;
-
-/** Local YYYY-MM-DD. `toISOString().slice(0, 10)` is UTC and flips date all evening west of UTC. */
-function localDateKey(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-}
 
 interface QueuedRun {
   key: string;

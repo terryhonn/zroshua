@@ -3,6 +3,7 @@ import { DataSource, Repository } from 'typeorm';
 import { DATA_SOURCE } from '../db/database.module';
 import { Run } from '../db/entities';
 import { ConfigService } from '../config/config.service';
+import { localDateKey, localDaysAgoStart } from '../units/date';
 
 @Controller('api/stats')
 export class StatsController {
@@ -17,7 +18,7 @@ export class StatsController {
 
   @Get('runs')
   async list(@Query('days') days = '30') {
-    const from = Date.now() - Number(days) * 24 * 3600_000;
+    const from = localDaysAgoStart(Number(days) || 30).getTime();
     return this.runs
       .createQueryBuilder('r')
       .where('r.startTs >= :from', { from })
@@ -26,10 +27,11 @@ export class StatsController {
       .getMany();
   }
 
-  /** Daily aggregates per zone: minutes, liters (min/max), energy. */
+  /** Daily aggregates per zone: minutes, liters (min/max), energy.
+   *  `days` is local calendar days including today (not a rolling 24h window). */
   @Get('daily')
   async daily(@Query('days') days = '30') {
-    const from = Date.now() - Number(days) * 24 * 3600_000;
+    const from = localDaysAgoStart(Number(days) || 30).getTime();
     const rows = await this.runs
       .createQueryBuilder('r')
       .where('r.startTs >= :from AND r.endTs IS NOT NULL', { from })
@@ -38,7 +40,7 @@ export class StatsController {
     const settings = await this.config.getSettings();
     const byDay = new Map<string, any>();
     for (const r of rows) {
-      const day = new Date(Number(r.startTs)).toISOString().slice(0, 10);
+      const day = localDateKey(new Date(Number(r.startTs)));
       const d = byDay.get(day) ?? { day, minutes: 0, litersMin: 0, litersMax: 0, energyKwh: 0, tailKwh: 0, zones: {} as Record<string, any> };
       if (r.category === 'tail') {
         d.tailKwh += r.energyKwh ?? 0;
@@ -79,7 +81,7 @@ export class StatsController {
 
   @Get('export.csv')
   async csv(@Query('days') days = '365') {
-    const from = Date.now() - Number(days) * 24 * 3600_000;
+    const from = localDaysAgoStart(Number(days) || 365).getTime();
     const rows = await this.runs
       .createQueryBuilder('r')
       .where('r.startTs >= :from', { from })
