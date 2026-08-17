@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.9
+
+- **More reliable watering when valves flake.** A zone that failed to turn
+  ON used to stay in *fault* forever, so every later schedule was skipped
+  until you cleared it by hand — a single Wi-Fi blip could silence a zone
+  for days. Failed ON now skips only that run. While a run is active the
+  engine watches the switch: if it goes off or stays unavailable it
+  re-sends ON (up to 3 times) instead of sitting on a dry "watering" row.
+  After an add-on/HA restart a run with time left is turned back on
+  rather than abandoned because the valve briefly showed off.
+
 ## 0.4.8
 
 - **Fix: Today time / Today water counted the last 24 hours, not today.**

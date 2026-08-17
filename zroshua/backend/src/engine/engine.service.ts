@@ -20,6 +20,11 @@ const CHECKBACK_RETRIES = 3;
 /** Background retries after a stuck-open valve (OFF check-back already failed). */
 const STUCK_ESCALATE_MAX = 20;
 const STUCK_ESCALATE_INTERVAL_MS = 15_000;
+/** Mid-run: how long a confirmed-off valve may stay off before we re-send ON. */
+const MIDRUN_OFF_MS = 8_000;
+/** Mid-run: ESPHome/Wi-Fi often reboots as unavailable — wait longer before reassert. */
+const MIDRUN_UNAVAIL_MS = 20_000;
+const MIDRUN_REASSERT_MAX = 3;
 
 interface QueuedRun {
   key: string;
@@ -54,6 +59,10 @@ interface ActiveRun {
   energyIntegralWh: number;
   lastSampleTs: number;
   stopping?: boolean;
+  /** first time this run's valve was seen off/unavailable (mid-run hold check) */
+  droppedSince?: number;
+  reasserting?: boolean;
+  reassertCount?: number;
 }
 
 interface GroupRunState {
@@ -618,6 +627,8 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
       return this.skip(groupId, zone.id, 'group_paused', 'group is paused');
     if (zone.snoozeUntil && Number(zone.snoozeUntil) > now)
       return this.skip(groupId, zone.id, 'zone_paused', 'zone is paused');
+    if (this.faultZones.has(zone.id))
+      return this.skip(groupId, zone.id, 'fault', 'zone is in fault state (stuck open — will not start)');
     const gate = this.autoAllowed(zone);
     if (!gate.ok) return this.skip(groupId, zone.id, 'auto_disabled', gate.reason ?? 'auto allow is off');
     const settings = await this.config.getSettings();
@@ -778,7 +789,7 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
       if (!zone || !zone.enabled) continue;
       if (zoneSel && !zoneSel.has(zone.id)) continue; // schedule waters a subset of the group
       if (this.faultZones.has(zone.id)) {
-        await this.skip(group.id, zone.id, 'fault', 'zone is in fault state');
+        await this.skip(group.id, zone.id, 'fault', 'zone is in fault state (stuck open — will not start)');
         continue;
       }
       if (!manual && zone.snoozeUntil && Number(zone.snoozeUntil) > now) {
@@ -1166,10 +1177,13 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
 
       const ok = await this.switchWithCheckback(zone, true);
       if (!ok) {
-        this.faultZones.add(zone.id);
+        // A failed ON is this run only — do not lock the zone out of later
+        // schedules (Wi-Fi valves flake). Stuck-OPEN is the safety lockout.
         await this.journal.add('fault', { zoneId: zone.id, code: 'checkback_on', detail: 'zone did not turn on after retries' });
         await this.notify.emit('fault', `⚠️ Zone "${zone.name}" failed to turn ON — skipped, rest of the plan continues.`);
         if (src?.pumpEntity) await this.releasePump(src);
+        await this.settleEmptyGroupRuns();
+        this.broadcastState();
         return;
       }
 
@@ -1773,6 +1787,7 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
 
   private async superviseActive(now: number) {
     for (const run of [...this.active]) {
+      if (run.stopping || run.reasserting) continue;
       const zone = this.zone(run.zoneId);
       if (now >= run.endsAt) {
         await this.finishRun(run, 'completed');
@@ -1781,7 +1796,70 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
       if (zone && (now - run.startTs) / 60_000 > (zone.maxRuntimeMin || 1e9)) {
         await this.journal.add('fault', { zoneId: zone.id, code: 'max_runtime', detail: 'failsafe max runtime exceeded' });
         await this.finishRun(run, 'max_runtime');
+        continue;
       }
+      if (zone) await this.holdCheck(run, zone, now);
+    }
+  }
+
+  /** Confirmed on / confirmed off / unavailable-or-mixed. Unavailable is not treated as off. */
+  private zoneValveState(zone: Zone): 'on' | 'off' | 'unavailable' {
+    const modes = zone.entities.map((e) => {
+      const s = this.ha.getState(e)?.state;
+      if (s === undefined || s === 'unavailable' || s === 'unknown') return 'unavailable' as const;
+      if (s === 'on' || s === 'open') return 'on' as const;
+      return 'off' as const;
+    });
+    if (modes.every((m) => m === 'on')) return 'on';
+    if (modes.every((m) => m === 'off')) return 'off';
+    return 'unavailable';
+  }
+
+  /**
+   * If a valve drops off (or stays unavailable) while we still own the run,
+   * re-send ON. ESPHome/Wi-Fi valves reboot mid-cycle; without this the
+   * dashboard says watering and the sprinklers are dry.
+   */
+  private async holdCheck(run: ActiveRun, zone: Zone, now: number) {
+    const st = this.zoneValveState(zone);
+    if (st === 'on') {
+      run.droppedSince = undefined;
+      return;
+    }
+    if (!run.droppedSince) run.droppedSince = now;
+    const wait = st === 'unavailable' ? MIDRUN_UNAVAIL_MS : MIDRUN_OFF_MS;
+    if (now - run.droppedSince < wait) return;
+
+    run.reasserting = true;
+    run.reassertCount = (run.reassertCount ?? 0) + 1;
+    try {
+      await this.journal.add('info', {
+        zoneId: zone.id,
+        code: 'midrun_reassert',
+        detail: `valve ${st} during run — retry ${run.reassertCount}/${MIDRUN_REASSERT_MAX}`,
+      });
+      const ok = await this.switchWithCheckback(zone, true);
+      if (ok) {
+        run.droppedSince = undefined;
+        this.log.log(`Reasserted "${zone.name}" after mid-run ${st}`);
+        return;
+      }
+      if (run.reassertCount < MIDRUN_REASSERT_MAX) {
+        run.droppedSince = Date.now();
+        return;
+      }
+      await this.journal.add('fault', {
+        zoneId: zone.id,
+        code: 'midrun_lost',
+        detail: `valve stayed ${st} after ${MIDRUN_REASSERT_MAX} retries — ending run`,
+      });
+      await this.notify.emit(
+        'fault',
+        `⚠️ Zone "${zone.name}" dropped OFF during watering and did not come back — run ended.`,
+      );
+      await this.finishRun(run, 'fault');
+    } finally {
+      run.reasserting = false;
     }
   }
 
@@ -1832,13 +1910,33 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
       const zone = this.zone(p.zoneId);
       if (!zone) continue;
       const stillOn = zone.entities.some((e) => this.ha.isOn(e));
-      if (p.endsAt > now && stillOn) {
-        this.active.push({ ...p, lastSampleTs: now, stopping: false });
-        await this.journal.add('info', { zoneId: zone.id, code: 'resumed', detail: `resumed with ${((p.endsAt - now) / 60_000).toFixed(1)} min left` });
-      } else {
-        await this.runsRepo.update(p.runId, { endTs: now, actualMin: (now - p.startTs) / 60_000, stopReason: 'shutdown' });
-        if (stillOn) await this.switchWithCheckback(zone, false);
+      if (p.endsAt > now) {
+        // Time left: turn the valve back on even if HA shows off (add-on /
+        // controller restart). Only abandon if check-back fails.
+        const ok = stillOn || (await this.switchWithCheckback(zone, true));
+        if (ok) {
+          this.active.push({
+            ...p,
+            lastSampleTs: now,
+            stopping: false,
+            reasserting: false,
+            droppedSince: undefined,
+          });
+          await this.journal.add('info', {
+            zoneId: zone.id,
+            code: 'resumed',
+            detail: `resumed with ${((p.endsAt - now) / 60_000).toFixed(1)} min left`,
+          });
+          continue;
+        }
+        await this.journal.add('info', {
+          zoneId: zone.id,
+          code: 'resume_failed',
+          detail: 'could not turn zone back on after restart — run abandoned',
+        });
       }
+      await this.runsRepo.update(p.runId, { endTs: now, actualMin: (now - p.startTs) / 60_000, stopReason: 'shutdown' });
+      if (zone.entities.some((e) => this.ha.isOn(e))) await this.switchWithCheckback(zone, false);
     }
     // reconciliation: anything on without an active run gets turned off
     for (const zone of this.zones) {
@@ -1943,6 +2041,11 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
     if (group?.snoozeUntil && Number(group.snoozeUntil) > ts) reasons.push(`group paused until ${fmt(Number(group.snoozeUntil))}`);
     if (zones.length && zones.every((z) => z.snoozeUntil && Number(z.snoozeUntil) > ts))
       reasons.push('all zones paused');
+    if (zones.length) {
+      const stuck = zones.filter((z) => this.faultZones.has(z.id));
+      if (stuck.length === zones.length) reasons.push('zone is in fault (stuck open)');
+      else if (stuck.length) maybe.push(`${stuck.map((z) => z.name).join(', ')} in fault (stuck open)`);
+    }
 
     // sticky auto-allow gate (MQTT switch / optional HA entity) — sure skip if currently off
     if (zones.length) {
