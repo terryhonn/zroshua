@@ -54,3 +54,15 @@
 .z-navsec:first-child {
   padding-top: 4px;
 }
+
+/* Dashboard upcoming list: click a row to edit that group/zone schedule. */
+.z-upcoming-row {
+  cursor: pointer;
+  border-radius: 6px;
+  margin: 0 -6px;
+  padding-left: 6px;
+  padding-right: 6px;
+}
+.z-upcoming-row:hover {
+  background: color-mix(in srgb, var(--mantine-color-default-hover) 80%, transparent);
+}

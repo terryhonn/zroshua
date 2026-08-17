@@ -35,10 +35,12 @@ import {
   IconListNumbers,
 } from '@tabler/icons-react';
 import { notifications } from '@mantine/notifications';
-import { api, EngineState, Group as ZGroup, Settings, Upcoming, WeatherNow, Zone } from '../api';
+import { api, EngineState, Group as ZGroup, Settings, Upcoming, WaterSource, WeatherNow, Zone } from '../api';
 import { fmtDur, fmtTime, useJournal, useResource } from '../hooks';
 import { t, locale } from '../i18n';
 import { SliderInput } from '../components/common';
+import GroupEditorModal from '../components/GroupEditorModal';
+import ZoneEditorModal from '../components/ZoneEditorModal';
 import { formatTemp, formatVolume, TempUnit, VolumeUnit } from '../units';
 
 const JOURNAL_KIND_COLORS: Record<string, string> = {
@@ -206,9 +208,12 @@ export default function DashboardPage({ state, journalTick = 0 }: { state: Engin
   const { data: settings } = useResource<Settings>('/settings');
   const tempUnit: TempUnit = settings?.tempUnit === 'F' ? 'F' : 'C';
   const volUnit: VolumeUnit = settings?.volumeUnit === 'gal' ? 'gal' : 'L';
-  const { data: upcoming } = useResource<Upcoming[]>('/upcoming', [state?.active.length]);
-  const { data: zones } = useResource<Zone[]>('/zones');
-  const { data: groups } = useResource<ZGroup[]>('/groups');
+  const { data: upcoming, reload: reloadUpcoming } = useResource<Upcoming[]>('/upcoming', [state?.active.length]);
+  const { data: zones, reload: reloadZones } = useResource<Zone[]>('/zones');
+  const { data: groups, reload: reloadGroups } = useResource<ZGroup[]>('/groups');
+  const { data: sources } = useResource<WaterSource[]>('/sources');
+  const [editGroup, setEditGroup] = useState<Partial<ZGroup> | null>(null);
+  const [editZone, setEditZone] = useState<Partial<Zone> | null>(null);
   const journal = useJournal(journalTick);
   const { data: today } = useResource<{
     days: { day: string; minutes: number; litersMin: number; litersMax: number }[];
@@ -253,6 +258,16 @@ export default function DashboardPage({ state, journalTick = 0 }: { state: Engin
     } catch (e: any) {
       notifications.show({ message: e.message, color: 'red' });
     }
+  };
+
+  const openUpcoming = (u: Upcoming) => {
+    if (u.kind === 'zone') {
+      const z = (zones ?? []).find((z) => z.id === (u.targetId ?? u.zones[0]?.zoneId));
+      if (z) setEditZone(z);
+      return;
+    }
+    const g = (groups ?? []).find((g) => g.id === u.groupId);
+    if (g) setEditGroup(g);
   };
 
   /** pause/resume the target (group or single zone) of an upcoming row */
@@ -493,6 +508,9 @@ export default function DashboardPage({ state, journalTick = 0 }: { state: Engin
                         align={{ base: 'stretch', sm: 'center' }}
                         justify="space-between"
                         gap={{ base: 4, sm: 'sm' }}
+                        className="z-upcoming-row"
+                        onClick={() => openUpcoming(u)}
+                        title={u.kind === 'zone' ? t('Edit zone') : t('Edit group')}
                         style={{
                           borderBottom:
                             i < next.length - 1 ? '1px solid var(--mantine-color-default-border)' : undefined,
@@ -544,7 +562,11 @@ export default function DashboardPage({ state, journalTick = 0 }: { state: Engin
                           </Badge>
                           <Menu position="bottom-end" withArrow>
                             <Menu.Target>
-                              <ActionIcon variant="subtle" color={paused ? 'teal' : 'gray'}>
+                              <ActionIcon
+                                variant="subtle"
+                                color={paused ? 'teal' : 'gray'}
+                                onClick={(e) => e.stopPropagation()}
+                              >
                                 {paused ? <IconPlayerPlay size={16} /> : <IconPlayerPause size={16} />}
                               </ActionIcon>
                             </Menu.Target>
@@ -580,6 +602,58 @@ export default function DashboardPage({ state, journalTick = 0 }: { state: Engin
                 </Stack>
               ) : (
                 <Text c="dimmed">{t('No scheduled waterings in the next 7 days.')}</Text>
+              )}
+            </Card>
+
+            <Card withBorder>
+              <Title order={4} mb="sm">
+                {t('Journal')}
+              </Title>
+              {journal.length ? (
+                <ScrollArea h={320} type="auto" offsetScrollbars>
+                  <Stack gap={6} pr="xs">
+                    {journal.map((e) => {
+                      const target = nameOf(e.zoneId, e.groupId);
+                      return (
+                        <Group
+                          key={e.id}
+                          justify="space-between"
+                          align="flex-start"
+                          wrap="nowrap"
+                          gap="sm"
+                          style={{
+                            borderBottom: '1px solid var(--mantine-color-default-border)',
+                            paddingBottom: 6,
+                          }}
+                        >
+                          <Stack gap={2} style={{ minWidth: 0, flex: 1 }}>
+                            <Group gap={6} wrap="wrap">
+                              <Badge size="sm" variant="light" color={JOURNAL_KIND_COLORS[e.kind] ?? 'gray'}>
+                                {t(JOURNAL_KIND_LABELS[e.kind] ?? e.kind)}
+                                {e.code ? `: ${e.code}` : ''}
+                              </Badge>
+                              {target && (
+                                <Text size="sm" fw={500} truncate>
+                                  {target}
+                                </Text>
+                              )}
+                            </Group>
+                            {e.detail && (
+                              <Text size="sm" c="dimmed" style={{ overflowWrap: 'anywhere' }}>
+                                {e.detail}
+                              </Text>
+                            )}
+                          </Stack>
+                          <Text size="xs" c="dimmed" style={{ whiteSpace: 'nowrap', flexShrink: 0 }}>
+                            {new Date(Number(e.ts)).toLocaleString(locale)}
+                          </Text>
+                        </Group>
+                      );
+                    })}
+                  </Stack>
+                </ScrollArea>
+              ) : (
+                <Text c="dimmed">{t('No journal entries yet.')}</Text>
               )}
             </Card>
           </Stack>
@@ -778,58 +852,6 @@ export default function DashboardPage({ state, journalTick = 0 }: { state: Engin
         </Grid.Col>
       </Grid>
 
-      <Card withBorder>
-        <Title order={4} mb="sm">
-          {t('Journal')}
-        </Title>
-        {journal.length ? (
-          <ScrollArea h={320} type="auto" offsetScrollbars>
-            <Stack gap={6} pr="xs">
-              {journal.map((e) => {
-                const target = nameOf(e.zoneId, e.groupId);
-                return (
-                  <Group
-                    key={e.id}
-                    justify="space-between"
-                    align="flex-start"
-                    wrap="nowrap"
-                    gap="sm"
-                    style={{
-                      borderBottom: '1px solid var(--mantine-color-default-border)',
-                      paddingBottom: 6,
-                    }}
-                  >
-                    <Stack gap={2} style={{ minWidth: 0, flex: 1 }}>
-                      <Group gap={6} wrap="wrap">
-                        <Badge size="sm" variant="light" color={JOURNAL_KIND_COLORS[e.kind] ?? 'gray'}>
-                          {t(JOURNAL_KIND_LABELS[e.kind] ?? e.kind)}
-                          {e.code ? `: ${e.code}` : ''}
-                        </Badge>
-                        {target && (
-                          <Text size="sm" fw={500} truncate>
-                            {target}
-                          </Text>
-                        )}
-                      </Group>
-                      {e.detail && (
-                        <Text size="sm" c="dimmed" style={{ overflowWrap: 'anywhere' }}>
-                          {e.detail}
-                        </Text>
-                      )}
-                    </Stack>
-                    <Text size="xs" c="dimmed" style={{ whiteSpace: 'nowrap', flexShrink: 0 }}>
-                      {new Date(Number(e.ts)).toLocaleString(locale)}
-                    </Text>
-                  </Group>
-                );
-              })}
-            </Stack>
-          </ScrollArea>
-        ) : (
-          <Text c="dimmed">{t('No journal entries yet.')}</Text>
-        )}
-      </Card>
-
       <Modal opened={snoozeOpen} onClose={() => setSnoozeOpen(false)} title={t('Pause all watering')}>
         <Stack>
           <Text size="sm" c="dimmed">
@@ -910,6 +932,26 @@ export default function DashboardPage({ state, journalTick = 0 }: { state: Engin
           </Button>
         </Stack>
       </Modal>
+      <GroupEditorModal
+        group={editGroup}
+        zones={zones}
+        onClose={() => setEditGroup(null)}
+        onSaved={() => {
+          setEditGroup(null);
+          reloadGroups();
+          reloadUpcoming();
+        }}
+      />
+      <ZoneEditorModal
+        zone={editZone}
+        sources={sources}
+        onClose={() => setEditZone(null)}
+        onSaved={() => {
+          setEditZone(null);
+          reloadZones();
+          reloadUpcoming();
+        }}
+      />
     </Stack>
   );
 }
