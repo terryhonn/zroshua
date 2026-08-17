@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.10
+
+- **Dashboard: click an upcoming watering to edit it.** Group runs open
+  the Edit group dialog; zone-only schedules open Edit zone. The Journal
+  card sits in the same left column as Upcoming so the two match in width.
+
 ## 0.4.9
 
 - **More reliable watering when valves flake.** A zone that failed to turn
