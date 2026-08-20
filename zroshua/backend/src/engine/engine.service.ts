@@ -10,7 +10,7 @@ import { WeatherService } from '../weather/weather.service';
 import { EventsService } from '../events/events.service';
 import { inSeason, occurrences } from './planner';
 import { formatTempC } from '../units/temp';
-import { formatFlowLpm, formatVolumeL, haFlowToLpm, VolumeUnit } from '../units/volume';
+import { formatFlowLpm, formatVolumeL, haFlowSensorKind, haFlowToLpm, haVolumeToL, VolumeUnit } from '../units/volume';
 import { localDateKey } from '../units/date';
 
 const TICK_MS = 1000;
@@ -58,6 +58,8 @@ interface ActiveRun {
   energySnapshotKwh: number | null;
   energyIntegralWh: number;
   lastSampleTs: number;
+  /** liters measured from the source flow sensor during this run (0 = none yet). */
+  flowIntegralL: number;
   stopping?: boolean;
   /** first time this run's valve was seen off/unavailable (mid-run hold check) */
   droppedSince?: number;
@@ -258,6 +260,7 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
     await this.processQueue(now);
     await this.superviseActive(now);
     this.sampleEnergy(now);
+    this.sampleFlow(now);
     await this.superviseTails(now);
     await this.trackRainWet(now);
 
@@ -290,6 +293,11 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
   /** last integration timestamp for source level accounting */
   private lastLevelTs = 0;
   private lowLevelAlerted = new Set<string>();
+  /** last volume-counter reading (liters) per source, for delta accounting */
+  private lastFlowCounterL = new Map<string, number>();
+  private lastFlowTs = 0;
+  /** liters attributed from the flow sensor on the latest sampleFlow tick */
+  private lastMeasuredOutL = new Map<string, number>();
 
   /**
    * Estimates the water level of finite sources (barrels): capacity minus the
@@ -311,14 +319,19 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
           this.sourceLevels.get(src.id) ??
           (await this.config.getKV<number>(`sourceLevelL:${src.id}`, src.capacityL));
         if (dtMin > 0 && dtMin < 10) {
-          let outLpm = 0;
-          for (const a of this.active) {
-            const z = this.zone(a.zoneId);
-            if (!z || z.sourceId !== src.id) continue;
-            const f = z.flowLpm;
-            outLpm += f === null || f === undefined ? 0 : typeof f === 'number' ? f : (f.min + f.max) / 2;
+          const measuredL = this.lastMeasuredOutL.get(src.id);
+          let outL = measuredL;
+          if (outL == null) {
+            let outLpm = 0;
+            for (const a of this.active) {
+              const z = this.zone(a.zoneId);
+              if (!z || z.sourceId !== src.id) continue;
+              const f = z.flowLpm;
+              outLpm += f === null || f === undefined ? 0 : typeof f === 'number' ? f : (f.min + f.max) / 2;
+            }
+            outL = outLpm * dtMin;
           }
-          level = Math.max(0, Math.min(src.capacityL, level - outLpm * dtMin + (src.refillLpm ?? 0) * dtMin));
+          level = Math.max(0, Math.min(src.capacityL, level - outL + (src.refillLpm ?? 0) * dtMin));
         }
       }
       // persist at most once a minute to spare the DB
@@ -1217,6 +1230,7 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
         energySnapshotKwh: snapshot,
         energyIntegralWh: 0,
         lastSampleTs: now,
+        flowIntegralL: 0,
       });
       await this.persistActive();
       await this.journal.add('run_start', {
@@ -1312,12 +1326,15 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
       else if (run.energyIntegralWh > 0) energyKwh = run.energyIntegralWh / 1000;
     }
     const flow = zone?.flowLpm;
-    const [lMin, lMax] =
+    const estimated =
       flow === null || flow === undefined
-        ? [null, null]
+        ? ([null, null] as [number | null, number | null])
         : typeof flow === 'number'
-          ? [flow * actualMin, flow * actualMin]
-          : [flow.min * actualMin, flow.max * actualMin];
+          ? ([flow * actualMin, flow * actualMin] as [number, number])
+          : ([flow.min * actualMin, flow.max * actualMin] as [number, number]);
+    // Prefer liters integrated from the source flow sensor (rate or totalizer).
+    const measured = run.flowIntegralL > 0.01 ? run.flowIntegralL : null;
+    const [lMin, lMax] = measured != null ? [measured, measured] : estimated;
 
     await this.runsRepo.update(run.runId, {
       endTs: now,
@@ -1615,6 +1632,7 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
       energySnapshotKwh: null,
       energyIntegralWh: 0,
       lastSampleTs: now,
+      flowIntegralL: 0,
     });
     await this.persistActive();
     this.broadcastState();
@@ -1701,9 +1719,69 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
   /** Read a flow sensor and normalize to L/min (HA may report gal/min / GPM). */
   private flowSensorLpm(entityId: string): number | null {
     const st = this.ha.getState(entityId);
+    const unit = st?.attributes?.unit_of_measurement ?? null;
+    const kind = haFlowSensorKind(unit, st?.attributes?.state_class);
+    if (kind === 'volume') return null; // totalizer — no instantaneous rate
     const v = this.ha.numeric(entityId);
     if (v === null) return null;
-    return haFlowToLpm(v, st?.attributes?.unit_of_measurement ?? null);
+    return haFlowToLpm(v, unit);
+  }
+
+  /**
+   * Attribute water from the source flow sensor to active runs.
+   * Rate sensors (L/min, GPM) are integrated; totalizers (L, gal) use deltas.
+   * Parallel zones on one source share the tick proportional to configured flow.
+   */
+  private sampleFlow(now: number) {
+    const dtMin = this.lastFlowTs ? (now - this.lastFlowTs) / 60_000 : 0;
+    this.lastFlowTs = now;
+    this.lastMeasuredOutL.clear();
+    if (dtMin <= 0 || dtMin >= 10) {
+      // First tick or a long gap: seed volume counters so the next delta is clean.
+      for (const src of this.sources) {
+        if (!src.flowSensor) continue;
+        const st = this.ha.getState(src.flowSensor);
+        const unit = st?.attributes?.unit_of_measurement ?? null;
+        if (haFlowSensorKind(unit, st?.attributes?.state_class) !== 'volume') continue;
+        const v = this.ha.numeric(src.flowSensor);
+        if (v !== null) this.lastFlowCounterL.set(src.id, haVolumeToL(v, unit));
+      }
+      return;
+    }
+
+    for (const src of this.sources) {
+      if (!src.flowSensor) continue;
+      const st = this.ha.getState(src.flowSensor);
+      const unit = st?.attributes?.unit_of_measurement ?? null;
+      const kind = haFlowSensorKind(unit, st?.attributes?.state_class);
+      const v = this.ha.numeric(src.flowSensor);
+      let liters = 0;
+      if (v === null) continue;
+      if (kind === 'volume') {
+        const cur = haVolumeToL(v, unit);
+        const prev = this.lastFlowCounterL.get(src.id);
+        if (prev != null && cur >= prev) liters = cur - prev;
+        this.lastFlowCounterL.set(src.id, cur);
+      } else {
+        liters = haFlowToLpm(v, unit) * dtMin;
+      }
+      if (liters < 0) liters = 0;
+      this.lastMeasuredOutL.set(src.id, liters);
+
+      const runs = this.active.filter((a) => a.sourceId === src.id);
+      if (!runs.length || liters === 0) continue;
+      const weights = runs.map((a) => {
+        const z = this.zone(a.zoneId);
+        const f = z?.flowLpm;
+        if (f == null) return 1;
+        const w = typeof f === 'number' ? f : (f.min + f.max) / 2;
+        return w > 0 ? w : 1;
+      });
+      const sumW = weights.reduce((s, w) => s + w, 0) || runs.length;
+      runs.forEach((a, i) => {
+        a.flowIntegralL += liters * (weights[i] / sumW);
+      });
+    }
   }
 
   // ---------------------------------------------------------------- energy
@@ -1921,6 +1999,7 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
             stopping: false,
             reasserting: false,
             droppedSince: undefined,
+            flowIntegralL: p.flowIntegralL ?? 0,
           });
           await this.journal.add('info', {
             zoneId: zone.id,

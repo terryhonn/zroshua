@@ -29,8 +29,10 @@ and applies instantly without restarts.
 - **Water source** *(optional)* — declares hydraulics: max flow budget (l/min), a pump
   entity with start/stop delays (the pump is reference-counted across zones), a dependency
   on another source (a barrel refilled by the well is blocked while well zones run),
-  a "water available" binary sensor, an energy meter and an optional flow sensor with an
-  idle-flow leak alert.
+  a "water available" binary sensor, an energy meter and an optional flow sensor.
+  The flow sensor **measures water used during runs** (instantaneous L/min / GPM, or a
+  totalizing L/gal counter via `unit_of_measurement` / `state_class`) and also drives
+  idle-flow leak alerts. Zones must be assigned to the source for usage to be recorded.
   - **Exclusivity**: sources marked *never run at the same time* make every pair of groups
     drawing from them mutually exclusive — the scheduler, the timeline conflict check and
     the time-slot picker treat it like a never-overlap rule without one being written.

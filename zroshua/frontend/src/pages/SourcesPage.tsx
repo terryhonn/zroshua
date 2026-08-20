@@ -195,7 +195,7 @@ export default function SourcesPage() {
                 label={
                   <HintLabel
                     label={t('Flow sensor')}
-                    hint={t('optional; L/min or gal/min — HA unit_of_measurement is used')}
+                    hint={t('Measures water used during runs (L/min or GPM rate, or a total L/gal counter). Also used for idle-flow and deviation alerts. Zones must be assigned to this source.')}
                   />
                 }
                 value={editing.flowSensor ?? null}

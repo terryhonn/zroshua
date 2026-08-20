@@ -189,8 +189,8 @@ still work. Use it to skip today's run for one bed or group without turning it o
 Sources make hydraulics first-class: a **max flow budget** (l/min — the scheduler never lets
 concurrently running zones exceed it), a **pump entity** kept on while any zone of the source
 runs (reference-counted, with start/stop delays), a **dependency** on another source
-("blocked while that source runs"), a *water available* sensor, an optional flow sensor with
-an idle-flow leak alert, an **energy meter** and a configurable **refill tail** (count pump
+("blocked while that source runs"), a *water available* sensor, an optional flow sensor that
+measures water used during runs (and idle-flow leak alerts), an **energy meter** and a configurable **refill tail** (count pump
 energy for N minutes after selected groups finish — e.g. while the barrel refills).
 
 **Pump after a run**: choose what happens when the last zone finishes — *turn the pump off*

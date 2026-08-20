@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.11
+
+- **Source flow sensor now measures water usage.** It was only used for
+  idle-flow and deviation alerts; Today water / stats still came from each
+  zone's configured L/min × minutes. A rate sensor (L/min, GPM) is
+  integrated during the run; a totalizer (L, gal, `state_class:
+  total_increasing`) uses the counter delta. Parallel zones on one source
+  share the measured volume by their configured flow rates. Zone estimates
+  remain the fallback when the sensor is missing or silent.
+
 ## 0.4.10
 
 - **Dashboard: click an upcoming watering to edit it.** Group runs open
