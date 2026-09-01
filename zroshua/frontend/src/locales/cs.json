@@ -107,6 +107,8 @@
   "HA disconnected": "HA odpojeno",
   "Home Assistant does not share your account language with add-ons, so this follows your device by default — override it here.": "Home Assistant nesdílí jazyk účtu s doplňky, proto se výchozí použije jazyk zařízení — zde jej lze změnit.",
   "Home Assistant integration (MQTT)": "Integrace s Home Assistantem (MQTT)",
+  "High-priority faults": "Vysokoprioritní poruchy",
+  "Companion app: faults use ttl 0, priority high, and tag Zroshua so they cut through Doze and replace the previous Zroshua alert. Other events stay a normal message.": "Aplikace Companion: poruchy s ttl 0, priority high a tagem Zroshua, aby prorazily Doze a nahradily předchozí upozornění Zroshua. Ostatní události zůstanou běžnou zprávou.",
   "Home Assistant notify": "Oznámení Home Assistant",
   "Idle flow": "Průtok v klidu",
   "Idle-flow alert threshold": "Práh upozornění na průtok v klidu",

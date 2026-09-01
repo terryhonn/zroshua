@@ -178,6 +178,8 @@
   "hail": "hail",
   "Home Assistant does not share your account language with add-ons, so this follows your device by default — override it here.": "Home Assistant does not share your account language with add-ons, so this follows your device by default — override it here.",
   "Home Assistant integration (MQTT)": "Home Assistant integration (MQTT)",
+  "High-priority faults": "High-priority faults",
+  "Companion app: faults use ttl 0, priority high, and tag Zroshua so they cut through Doze and replace the previous Zroshua alert. Other events stay a normal message.": "Companion app: faults use ttl 0, priority high, and tag Zroshua so they cut through Doze and replace the previous Zroshua alert. Other events stay a normal message.",
   "Home Assistant notify": "Home Assistant notify",
   "HA notify test failed": "HA notify test failed",
   "how many must be wet": "how many must be wet",

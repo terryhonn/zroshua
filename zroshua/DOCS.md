@@ -201,6 +201,9 @@ Providers are configured in Settings → Notifications:
 - **Telegram** — set `telegram_bot_token` in the add-on options, then add a provider with
   your chat ID(s).
 - **Home Assistant notify** — any `notify.*` service, including mobile push.
+  Optional *High-priority faults* (companion app): faults go out as
+  `ttl: 0`, `priority: high`, tag `Zroshua` so they cut through Doze and
+  replace the previous Zroshua alert. Other events stay a normal message.
 
 Events (each provider can subscribe selectively): watering started, watering finished
 (duration + time until the next run), skipped (with reason), stopped by rain, faults,

@@ -297,7 +297,8 @@ trigger, updates the zone but leaves the group as it was.
   notification naming the exact entity.
 - **Notifications**: Telegram (several chat IDs) and/or any HA `notify.*` service, each with
   its own event filter — started, finished (duration + time to next run), skipped (with
-  reason), stopped by rain, faults, system. **Group-level mode** collapses a sequential run
+  reason), stopped by rain, faults, system. HA notify can send **high-priority faults**
+  (`ttl: 0`, `priority: high`, tag `Zroshua`) to the companion app. **Group-level mode** collapses a sequential run
   of 13 beds into two messages (started / finished with totals) instead of 26; a **daily
   digest** at a chosen time sums up runs, liters, energy, cost and skips (sent to every
   provider; not blocked by quiet hours or event filters — Settings has a **Send test

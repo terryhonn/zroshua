@@ -36,7 +36,7 @@ export type TempTrigger = {
 
 export type NotificationProvider =
   | { type: 'telegram'; chatIds: string[]; events: string[] }
-  | { type: 'ha_notify'; service: string; events: string[] };
+  | { type: 'ha_notify'; service: string; events: string[]; urgentFaults?: boolean };
 
 export type TempUnit = 'C' | 'F';
 export type VolumeUnit = 'L' | 'gal';

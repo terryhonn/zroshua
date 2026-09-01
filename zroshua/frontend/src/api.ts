@@ -251,7 +251,7 @@ export interface TempTrigger {
 
 export type NotificationProvider =
   | { type: 'telegram'; chatIds: string[]; events: string[] }
-  | { type: 'ha_notify'; service: string; events: string[] };
+  | { type: 'ha_notify'; service: string; events: string[]; urgentFaults?: boolean };
 
 export interface JournalEntry {
   id: number;

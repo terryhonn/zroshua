@@ -7,6 +7,10 @@
   sum-of-zone-minutes still appears as a subtitle when it differs (so a
   parallel run is visible). Overnight runs only count the part after local
   midnight.
+- **High-priority HA faults.** On an HA notify provider, *High-priority
+  faults* sends companion-app faults with `ttl: 0`, `priority: high` and
+  tag `Zroshua` (replaces the previous Zroshua alert). Other events stay a
+  plain `message`. *Test notify* uses that payload when the switch is on.
 
 ## 0.4.11
 

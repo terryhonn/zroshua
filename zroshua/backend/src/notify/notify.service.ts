@@ -48,7 +48,7 @@ export class NotifyService {
       if (event !== 'digest' && provider.events.length && !provider.events.includes(event)) continue;
       attempted++;
       try {
-        await this.deliver(provider, message);
+        await this.deliver(provider, event, message);
         sent++;
       } catch (e: any) {
         this.log.warn(`Provider ${provider.type} failed: ${e.message}`);
@@ -57,7 +57,7 @@ export class NotifyService {
     return { sent, attempted };
   }
 
-  private async deliver(provider: any, message: string) {
+  private async deliver(provider: any, event: NotifyEvent, message: string) {
     switch (provider.type) {
       case 'telegram': {
         if (!env.telegramToken) throw new Error('telegram_bot_token is not configured in add-on options');
@@ -75,7 +75,7 @@ export class NotifyService {
       }
       case 'ha_notify': {
         const [domain, service] = parseNotifyService(provider.service);
-        await this.ha.callService(domain, service, undefined, { message });
+        await this.ha.callService(domain, service, undefined, haNotifyData(event, message, provider));
         break;
       }
       default:
@@ -84,12 +84,26 @@ export class NotifyService {
   }
 
   /** Fire one HA notify service with a short ping — ignores event filters and quiet hours. */
-  async testHa(service: string): Promise<void> {
+  async testHa(service: string, urgentFaults = false): Promise<void> {
     await this.deliver(
-      { type: 'ha_notify', service, events: [] },
-      '🧪 Zroshua test: Home Assistant notify is working.',
+      { type: 'ha_notify', service, events: [], urgentFaults },
+      urgentFaults ? 'fault' : 'system',
+      urgentFaults
+        ? '🧪 Zroshua test: high-priority fault (ttl 0, tag Zroshua).'
+        : '🧪 Zroshua test: Home Assistant notify is working.',
     );
   }
+}
+
+/** Companion-app high-priority payload for faults when the provider option is on. */
+function haNotifyData(event: NotifyEvent, message: string, provider: any): Record<string, unknown> {
+  if (event === 'fault' && provider.urgentFaults) {
+    return {
+      message,
+      data: { ttl: 0, priority: 'high', tag: 'Zroshua' },
+    };
+  }
+  return { message };
 }
 
 /** `notify.mobile_app_phone` or a bare `mobile_app_phone` (domain defaults to notify). */

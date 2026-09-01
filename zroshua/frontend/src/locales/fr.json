@@ -107,6 +107,8 @@
   "HA disconnected": "HA déconnecté",
   "Home Assistant does not share your account language with add-ons, so this follows your device by default — override it here.": "Home Assistant ne transmet pas la langue du compte aux modules, donc la langue de l’appareil est utilisée par défaut — modifiable ici.",
   "Home Assistant integration (MQTT)": "Intégration Home Assistant (MQTT)",
+  "High-priority faults": "Défauts haute priorité",
+  "Companion app: faults use ttl 0, priority high, and tag Zroshua so they cut through Doze and replace the previous Zroshua alert. Other events stay a normal message.": "Application Companion : les défauts partent avec ttl 0, priority high et le tag Zroshua pour passer Doze et remplacer l'alerte Zroshua précédente. Les autres événements restent un message normal.",
   "Home Assistant notify": "Notification Home Assistant",
   "Idle flow": "Débit au repos",
   "Idle-flow alert threshold": "Seuil d'alerte de débit au repos",

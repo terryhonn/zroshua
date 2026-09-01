@@ -150,10 +150,13 @@ export default function SettingsPage() {
     }
   };
 
-  const testHa = async (service: string, key: string) => {
+  const testHa = async (service: string, key: string, urgentFaults = false) => {
     setTesting(key);
     try {
-      const res = await api.post<{ ok: boolean; reason?: string; service?: string }>('/notifications/test-ha', { service });
+      const res = await api.post<{ ok: boolean; reason?: string; service?: string }>('/notifications/test-ha', {
+        service,
+        urgentFaults,
+      });
       if (res.ok) {
         notifications.show({ message: t('Test sent to {service}', { service: res.service ?? service }), color: 'teal' });
       } else {
@@ -486,22 +489,34 @@ export default function SettingsPage() {
                   onChange={(e) => setProvider(i, { chatIds: e.target.value.split(',').map((x) => x.trim()).filter(Boolean) } as any)}
                 />
               ) : (
-                <Group align="flex-end" wrap="wrap" gap="sm">
-                  <TextInput
-                    style={{ flex: 1, minWidth: 220 }}
-                    label={<HintLabel label={t('Notify service')} hint={t('e.g. notify.mobile_app_phone')} />}
-                    value={p.service}
-                    onChange={(e) => setProvider(i, { service: e.target.value } as any)}
+                <Stack gap="xs">
+                  <Group align="flex-end" wrap="wrap" gap="sm">
+                    <TextInput
+                      style={{ flex: 1, minWidth: 220 }}
+                      label={<HintLabel label={t('Notify service')} hint={t('e.g. notify.mobile_app_phone')} />}
+                      value={p.service}
+                      onChange={(e) => setProvider(i, { service: e.target.value } as any)}
+                    />
+                    <Button
+                      variant="light"
+                      disabled={!p.service?.trim() || testing !== null}
+                      loading={testing === `ha:${i}`}
+                      onClick={() => testHa(p.service, `ha:${i}`, !!p.urgentFaults)}
+                    >
+                      {t('Test notify')}
+                    </Button>
+                  </Group>
+                  <Switch
+                    label={
+                      <HintLabel
+                        label={t('High-priority faults')}
+                        hint={t('Companion app: faults use ttl 0, priority high, and tag Zroshua so they cut through Doze and replace the previous Zroshua alert. Other events stay a normal message.')}
+                      />
+                    }
+                    checked={!!p.urgentFaults}
+                    onChange={(e) => setProvider(i, { urgentFaults: e.currentTarget.checked } as any)}
                   />
-                  <Button
-                    variant="light"
-                    disabled={!p.service?.trim() || testing !== null}
-                    loading={testing === `ha:${i}`}
-                    onClick={() => testHa(p.service, `ha:${i}`)}
-                  >
-                    {t('Test notify')}
-                  </Button>
-                </Group>
+                </Stack>
               )}
               <MultiSelect
                 label={<HintLabel label={t('Events')} hint={t('empty = all realtime events. The daily digest is always sent when enabled.')} />}

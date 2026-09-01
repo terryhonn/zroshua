@@ -165,11 +165,11 @@ export class ActionsController {
 
   /** Ping a single HA notify service (the one typed in Settings, even if not saved). */
   @Post('notifications/test-ha')
-  async testHa(@Body() body: { service?: string }) {
+  async testHa(@Body() body: { service?: string; urgentFaults?: boolean }) {
     const service = String(body?.service ?? '').trim();
     if (!service) return { ok: false, reason: 'Notify service is empty' };
     try {
-      await this.notify.testHa(service);
+      await this.notify.testHa(service, !!body?.urgentFaults);
       return { ok: true, service };
     } catch (e: any) {
       return { ok: false, reason: e.message ?? 'HA notify failed' };

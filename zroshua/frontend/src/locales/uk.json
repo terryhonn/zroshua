@@ -107,6 +107,8 @@
   "HA disconnected": "HA від'єднано",
   "Home Assistant does not share your account language with add-ons, so this follows your device by default — override it here.": "Home Assistant не передає мову акаунту в аддони, тож за замовчуванням береться мова пристрою — тут можна змінити.",
   "Home Assistant integration (MQTT)": "Інтеграція з Home Assistant (MQTT)",
+  "High-priority faults": "Невідкладні несправності",
+  "Companion app: faults use ttl 0, priority high, and tag Zroshua so they cut through Doze and replace the previous Zroshua alert. Other events stay a normal message.": "Додаток Companion: несправності з ttl 0, priority high і тегом Zroshua, щоб пробити Doze і замінити попереднє сповіщення Zroshua. Інші події лишаються звичайним повідомленням.",
   "Home Assistant notify": "Сповіщення Home Assistant",
   "Idle flow": "Витрата без поливу",
   "Idle-flow alert threshold": "Поріг сповіщення про витрату без поливу",
