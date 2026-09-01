@@ -456,6 +456,7 @@
   "{n} enabled": "{n} activées",
   "{n} kWh": "{n} kWh",
   "{n} min": "{n} min",
+  "{n} min across zones": "{n} min toutes zones",
   "{n} min ago": "il y a {n} min",
   "{n} queued": "{n} en file",
   "{n}h ago": "il y a {n} h",

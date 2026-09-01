@@ -126,6 +126,29 @@ function formatTodayMinutes(minutes: number, fmt: TodayTimeFormat): string {
   return t('{h} hrs, {m} min', { h, m: rem });
 }
 
+/** Merged length of possibly overlapping [start, end] ranges, in ms. */
+function unionDurationMs(intervals: Array<[number, number]>): number {
+  const segs = intervals
+    .filter(([s, e]) => Number.isFinite(s) && Number.isFinite(e) && e > s)
+    .sort((a, b) => a[0] - b[0]);
+  if (!segs.length) return 0;
+  let total = 0;
+  let cs = segs[0][0];
+  let ce = segs[0][1];
+  for (let i = 1; i < segs.length; i++) {
+    const [s, e] = segs[i];
+    if (s <= ce) ce = Math.max(ce, e);
+    else {
+      total += ce - cs;
+      cs = s;
+      ce = e;
+    }
+  }
+  return total + (ce - cs);
+}
+
+type StatsRun = { startTs: number | string; endTs: number | string | null; category?: string };
+
 function InfoTile({
   label,
   value,
@@ -219,6 +242,8 @@ export default function DashboardPage({ state, journalTick = 0 }: { state: Engin
     days: { day: string; minutes: number; litersMin: number; litersMax: number }[];
     totals: { minutes: number; litersMin: number; litersMax: number };
   }>('/stats/daily?days=1', [state?.active.length]);
+  // Two local days so a run that started before midnight is still clipped into today.
+  const { data: recentRuns } = useResource<StatsRun[]>('/stats/runs?days=2', [state?.active.length]);
 
   const nameOf = (zoneId: string | null, groupId: string | null) => {
     if (zoneId) return zones?.find((z) => z.id === zoneId)?.name ?? zoneId;
@@ -288,8 +313,31 @@ export default function DashboardPage({ state, journalTick = 0 }: { state: Engin
   })();
   const todayRow = today?.days?.find((d) => d.day === todayKey) ?? (today ? { ...today.totals, day: todayKey } : null);
   const liveMin = (state?.active ?? []).reduce((acc, a) => acc + Math.max(0, (nowTick - a.startTs) / 60_000), 0);
-  const minutesToday = todayRow ? todayRow.minutes + liveMin : null;
+  /** Sum of each zone's minutes (parallel zones add). Shown as a subtitle when it differs from wall-clock. */
+  const zoneMinutesToday = todayRow ? todayRow.minutes + liveMin : null;
   const litersToday = todayRow ? (todayRow.litersMin + todayRow.litersMax) / 2 : null;
+  // Wall-clock: overlapping zone runs count once, clipped to local midnight..now.
+  const dayStart = new Date(nowTick);
+  dayStart.setHours(0, 0, 0, 0);
+  const wallMinutesToday = (() => {
+    const from = dayStart.getTime();
+    const intervals: Array<[number, number]> = [];
+    const clip = (start: number, end: number) => {
+      const lo = Math.max(start, from);
+      const hi = Math.min(end, nowTick);
+      if (hi > lo) intervals.push([lo, hi]);
+    };
+    for (const r of recentRuns ?? []) {
+      if (r.category === 'tail') continue;
+      const start = Number(r.startTs);
+      const end = r.endTs == null || r.endTs === '' ? nowTick : Number(r.endTs);
+      if (!Number.isFinite(start) || !Number.isFinite(end)) continue;
+      clip(start, end);
+    }
+    for (const a of state?.active ?? []) clip(a.startTs, nowTick);
+    if (recentRuns == null && !(state?.active?.length)) return zoneMinutesToday;
+    return unionDurationMs(intervals) / 60_000;
+  })();
 
   const reorderTiles = (from: TileId, to: TileId) => {
     if (from === to) return;
@@ -393,8 +441,16 @@ export default function DashboardPage({ state, journalTick = 0 }: { state: Engin
       <InfoTile
         key="today_time"
         label={t('Today time')}
-        value={minutesToday !== null ? formatTodayMinutes(minutesToday, todayTimeFmt) : '—'}
-        sub={todayTimeFmt === 'hm' ? t('hours + minutes') : t('minutes')}
+        value={wallMinutesToday !== null ? formatTodayMinutes(wallMinutesToday, todayTimeFmt) : '—'}
+        sub={
+          zoneMinutesToday != null &&
+          wallMinutesToday != null &&
+          Math.round(zoneMinutesToday) - Math.round(wallMinutesToday) >= 1
+            ? t('{n} min across zones', { n: Math.round(zoneMinutesToday) })
+            : todayTimeFmt === 'hm'
+              ? t('hours + minutes')
+              : t('minutes')
+        }
         icon={<IconClockHour4 size={22} />}
         color="orange"
         clickable

@@ -456,6 +456,7 @@
   "{n} enabled": "{n} activate",
   "{n} kWh": "{n} kWh",
   "{n} min": "{n} min",
+  "{n} min across zones": "{n} min pe zone",
   "{n} min ago": "acum {n} min",
   "{n} queued": "{n} în coadă",
   "{n}h ago": "acum {n} h",

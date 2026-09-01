@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.12
+
+- **Dashboard Today time is wall-clock.** Overlapping zones no longer add:
+  two zones watering at once for 30 min show **30 min**, not 60. The old
+  sum-of-zone-minutes still appears as a subtitle when it differs (so a
+  parallel run is visible). Overnight runs only count the part after local
+  midnight.
+
 ## 0.4.11
 
 - **Source flow sensor now measures water usage.** It was only used for
