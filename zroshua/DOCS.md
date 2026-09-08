@@ -86,7 +86,10 @@ and applies instantly without restarts.
   that watering finishes.
 - **Zone-level schedules**: a zone can carry its own schedules in addition to its group —
   useful when one bed needs watering more often. Such runs are single-zone but still obey
-  the group's rules, flow budgets, rain/soil sensors and weather scaling.
+  the group's rules (including sequential / parallel-limit occupancy), flow budgets,
+  rain/soil sensors and weather scaling. A sequential group never runs two of its
+  zones at once, even when one run was resumed after a restart and another schedule
+  fires — ESPHome controllers that only allow one valve would otherwise bounce.
 - Per-schedule zone duration overrides: each schedule can override zone durations
   (defaults come from the zone); the editor previews the end time of every start,
   including the worst-case temperature boost.

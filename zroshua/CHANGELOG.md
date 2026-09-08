@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.4.13
+
+- **Fix: sequential zones bouncing mid-run (retry 96/3).** Two bugs stacked
+  on ESPHome-style controllers that only allow one valve at a time. Sequential
+  occupancy was counted per *group run id*, so a resumed run (or a refired
+  schedule, or a zone-level schedule) could start Front Zone 2 while Front
+  Zone 1 was still watering; each mid-run reassert turned the other valve
+  off, and they ping-ponged for the rest of the slot. Successful reasserts
+  also never counted toward the 3-try cap, so the journal showed
+  `retry 95/3` until check-back finally failed. Occupancy is now group-wide,
+  a group start skips zones that are already running, an earlier sequential
+  sibling keeps the valve, and the 3-try budget includes successes
+  (`retry 1/3` … `3/3`, then `midrun_lost`).
+
 ## 0.4.12
 
 - **Dashboard Today time is wall-clock.** Overlapping zones no longer add:

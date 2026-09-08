@@ -801,6 +801,15 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
       const zone = this.zone(group.zoneIds[i]);
       if (!zone || !zone.enabled) continue;
       if (zoneSel && !zoneSel.has(zone.id)) continue; // schedule waters a subset of the group
+      // Already watering this zone (resumed after restart, or a previous run
+      // still holding the valve). Queueing it again used to start the *next*
+      // sequential zone in parallel under a new groupRunId.
+      if (
+        this.active.some((a) => a.zoneId === zone.id) ||
+        this.startingZones.has(zone.id) ||
+        this.pendingStarts.some((p) => p.zoneId === zone.id)
+      )
+        continue;
       if (this.faultZones.has(zone.id)) {
         await this.skip(group.id, zone.id, 'fault', 'zone is in fault state (stuck open — will not start)');
         continue;
@@ -1070,6 +1079,21 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /**
+   * How many of this group's zones are currently opening or watering.
+   * Counts by zone id so a resumed run (stale groupRunId) still occupies
+   * the group, and a zone-level schedule with no groupRun does too.
+   */
+  private groupOccupancy(group: Group): number {
+    const members = new Set(group.zoneIds);
+    const occupies = (zoneId: string, groupId: string | null) => groupId === group.id || members.has(zoneId);
+    const seen = new Set<string>();
+    for (const a of this.active) if (occupies(a.zoneId, a.groupId)) seen.add(a.zoneId);
+    for (const p of this.pendingStarts) if (occupies(p.zoneId, p.groupId)) seen.add(p.zoneId);
+    for (const id of this.startingZones) if (members.has(id)) seen.add(id);
+    return seen.size;
+  }
+
   private canStart(q: QueuedRun, now: number): { ok: boolean; reason?: string } {
     if (q.notBefore > now) return { ok: false, reason: 'waiting for delay/soak' };
     const zone = this.zone(q.zoneId);
@@ -1086,14 +1110,17 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
 
     const groupRun = q.groupRunId ? this.groupRuns.get(q.groupRunId) : null;
     const group = this.group(q.groupId);
-    if (group && groupRun) {
-      const activeInRun =
-        this.active.filter((a) => a.groupRunId === q.groupRunId).length +
-        this.pendingStarts.filter((p) => p.groupRunId === q.groupRunId).length;
-      if (group.mode === 'sequential' && activeInRun > 0) return { ok: false, reason: 'sequential group busy' };
-      if (group.mode === 'parallel_limit' && activeInRun >= group.parallelLimit)
+    if (group) {
+      // Occupancy is group-wide, not per groupRunId. A resumed run keeps its
+      // old groupRunId (groupRuns is in-memory and empty after restart); a
+      // refired schedule used to start zone 2 next to the restored zone 1.
+      // Zone-level schedules have groupId but no groupRun — they still obey
+      // sequential / parallel_limit.
+      const n = this.groupOccupancy(group);
+      if (group.mode === 'sequential' && n > 0) return { ok: false, reason: 'sequential group busy' };
+      if (group.mode === 'parallel_limit' && n >= group.parallelLimit)
         return { ok: false, reason: 'group parallel limit reached' };
-      if (group.interZoneDelayS > 0 && groupRun.lastEndTs && now < groupRun.lastEndTs + group.interZoneDelayS * 1000)
+      if (groupRun && group.interZoneDelayS > 0 && groupRun.lastEndTs && now < groupRun.lastEndTs + group.interZoneDelayS * 1000)
         return { ok: false, reason: 'inter-zone delay' };
     }
 
@@ -1897,6 +1924,15 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
    * If a valve drops off (or stays unavailable) while we still own the run,
    * re-send ON. ESPHome/Wi-Fi valves reboot mid-cycle; without this the
    * dashboard says watering and the sprinklers are dry.
+   *
+   * Successful reasserts count toward MIDRUN_REASSERT_MAX — a flapping valve
+   * (or two sequential zones fighting over an exclusive controller) used to
+   * log "retry 96/3" forever because the cap only applied when check-back
+   * failed. After the budget is spent, the run ends.
+   *
+   * Sequential siblings never steal the valve from an earlier run: ESPHome
+   * sprinkler controllers turn the previous valve off when the next one
+   * turns on, which is what made Front Zone 1 and 2 bounce.
    */
   private async holdCheck(run: ActiveRun, zone: Zone, now: number) {
     const st = this.zoneValveState(zone);
@@ -1907,9 +1943,16 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
     if (!run.droppedSince) run.droppedSince = now;
     const wait = st === 'unavailable' ? MIDRUN_UNAVAIL_MS : MIDRUN_OFF_MS;
     if (now - run.droppedSince < wait) return;
+    if (this.earlierSequentialSibling(run)) return;
+
+    const used = run.reassertCount ?? 0;
+    if (used >= MIDRUN_REASSERT_MAX) {
+      await this.loseMidrun(run, zone, st);
+      return;
+    }
 
     run.reasserting = true;
-    run.reassertCount = (run.reassertCount ?? 0) + 1;
+    run.reassertCount = used + 1;
     try {
       await this.journal.add('info', {
         zoneId: zone.id,
@@ -1926,19 +1969,36 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
         run.droppedSince = Date.now();
         return;
       }
-      await this.journal.add('fault', {
-        zoneId: zone.id,
-        code: 'midrun_lost',
-        detail: `valve stayed ${st} after ${MIDRUN_REASSERT_MAX} retries — ending run`,
-      });
-      await this.notify.emit(
-        'fault',
-        `⚠️ Zone "${zone.name}" dropped OFF during watering and did not come back — run ended.`,
-      );
-      await this.finishRun(run, 'fault');
+      await this.loseMidrun(run, zone, st);
     } finally {
       run.reasserting = false;
     }
+  }
+
+  /** True when an earlier sequential-group run is still active — don't steal its valve. */
+  private earlierSequentialSibling(run: ActiveRun): boolean {
+    const group = this.group(run.groupId);
+    if (!group || group.mode !== 'sequential') return false;
+    const members = new Set(group.zoneIds);
+    return this.active.some((a) => {
+      if (a === run || a.stopping) return false;
+      if (!(a.groupId === group.id || members.has(a.zoneId))) return false;
+      if (a.startTs !== run.startTs) return a.startTs < run.startTs;
+      return a.zoneId < run.zoneId;
+    });
+  }
+
+  private async loseMidrun(run: ActiveRun, zone: Zone, st: string) {
+    await this.journal.add('fault', {
+      zoneId: zone.id,
+      code: 'midrun_lost',
+      detail: `valve stayed ${st} after ${MIDRUN_REASSERT_MAX} retries — ending run`,
+    });
+    await this.notify.emit(
+      'fault',
+      `⚠️ Zone "${zone.name}" dropped OFF during watering and did not come back — run ended.`,
+    );
+    await this.finishRun(run, 'fault');
   }
 
   private async persistActive() {
