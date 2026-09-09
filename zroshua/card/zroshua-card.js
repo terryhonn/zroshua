@@ -379,7 +379,6 @@ class ZroshuaCard extends HTMLElement {
       this._editDraft = JSON.parse(JSON.stringify(u.schedule));
       this._openAnim = true;
       this._sel = null;
-      this._tileCfg = false;
       this._render();
     });
     on('[data-close-edit]', () => {
