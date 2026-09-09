@@ -11,10 +11,24 @@
  *   view: dashboard        # dashboard | groups | zones | upcoming | timeline
  *   title: Irrigation      # optional
  *   entity: sensor.zroshua_state   # optional override
+ *   sections: [...]        # dashboard sections to show, in order (Lovelace editor)
+ *   tiles: [...]           # info tiles to show, in order
  */
 const VIEWS = ['dashboard', 'groups', 'zones', 'upcoming', 'timeline'];
 
-/** Dashboard info tiles — order/visibility configurable (card config + drag). */
+/** Dashboard sections — order/visibility from Lovelace card config (`sections`). */
+const DASH_SECTIONS = [
+  { id: 'tiles', label: 'Info tiles' },
+  { id: 'now', label: 'Now & queue' },
+  { id: 'upcoming', label: 'Upcoming waterings' },
+  { id: 'weather', label: 'Weather' },
+  { id: 'quick_actions', label: 'Quick actions' },
+  { id: 'manual_queue', label: 'Manual queue' },
+  { id: 'journal', label: 'Journal' },
+];
+const DASH_SECTION_IDS = DASH_SECTIONS.map((s) => s.id);
+
+/** Info tiles inside the tiles section (`tiles` config list). */
 const DASH_TILES = [
   { id: 'watering_now', label: 'Watering now' },
   { id: 'zones', label: 'Zones' },
@@ -24,7 +38,6 @@ const DASH_TILES = [
   { id: 'next_watering', label: 'Next watering' },
 ];
 const DASH_TILE_IDS = DASH_TILES.map((t) => t.id);
-const TILE_STORE_KEY = 'zroshua.card.tiles';
 
 const I = {
   play: '<svg viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z"/></svg>',
@@ -56,15 +69,26 @@ const zoneIcon = (type) =>
 
 class ZroshuaCard extends HTMLElement {
   setConfig(config) {
-    this._config = { view: 'dashboard', entity: 'sensor.zroshua_state', ...config };
+    this._config = {
+      view: 'dashboard',
+      entity: 'sensor.zroshua_state',
+      sections: [...DASH_SECTION_IDS],
+      tiles: [...DASH_TILE_IDS],
+      ...config,
+    };
     if (!VIEWS.includes(this._config.view)) throw new Error(`view must be one of ${VIEWS.join(', ')}`);
+    // Normalize lists from the visual editor.
+    if (!Array.isArray(this._config.sections) || !this._config.sections.length) {
+      this._config.sections = [...DASH_SECTION_IDS];
+    }
+    if (!Array.isArray(this._config.tiles) || !this._config.tiles.length) {
+      this._config.tiles = [...DASH_TILE_IDS];
+    }
     this._built = false;
     this._sel = null;
     this._filter = 'all';
-    this._tileCfg = false;
     this._editUp = null; // upcoming row being edited
     this._editDraft = null; // schedule draft
-    this._dragTile = null;
   }
 
   set hass(hass) {
@@ -94,11 +118,83 @@ class ZroshuaCard extends HTMLElement {
     return this._config.view === 'timeline' ? 4 : 6;
   }
 
-  static getConfigElement() {
-    return document.createElement('zroshua-card-editor');
+  /** Native Lovelace Visual editor (entity picker, reorderable lists, etc.). */
+  static getConfigForm() {
+    return {
+      schema: [
+        {
+          name: 'entity',
+          required: true,
+          selector: { entity: { domain: 'sensor' } },
+        },
+        {
+          name: 'title',
+          selector: { text: {} },
+        },
+        {
+          name: 'view',
+          selector: {
+            select: {
+              mode: 'dropdown',
+              options: VIEWS.map((v) => ({ value: v, label: v.charAt(0).toUpperCase() + v.slice(1) })),
+            },
+          },
+        },
+        {
+          name: 'sections',
+          selector: {
+            select: {
+              multiple: true,
+              reorder: true,
+              mode: 'list',
+              options: DASH_SECTIONS.map((s) => ({ value: s.id, label: s.label })),
+            },
+          },
+        },
+        {
+          name: 'tiles',
+          selector: {
+            select: {
+              multiple: true,
+              reorder: true,
+              mode: 'list',
+              options: DASH_TILES.map((t) => ({ value: t.id, label: t.label })),
+            },
+          },
+        },
+      ],
+      computeLabel: (schema) =>
+        ({
+          entity: 'Entity',
+          title: 'Title',
+          view: 'View',
+          sections: 'Dashboard sections',
+          tiles: 'Info tiles',
+        })[schema.name],
+      computeHelper: (schema) => {
+        switch (schema.name) {
+          case 'entity':
+            return 'Zroshua hub sensor (usually sensor.zroshua_state).';
+          case 'sections':
+            return 'Choose which blocks appear on the dashboard view and drag to set their order. Uncheck to hide.';
+          case 'tiles':
+            return 'Tiles inside the Info tiles section. Drag to reorder; uncheck to hide. Only used when Info tiles is enabled above.';
+          case 'view':
+            return 'dashboard is the Overview-style card; other views are specialized.';
+          default:
+            return undefined;
+        }
+      },
+    };
   }
+
   static getStubConfig() {
-    return { view: 'dashboard' };
+    return {
+      view: 'dashboard',
+      entity: 'sensor.zroshua_state',
+      sections: [...DASH_SECTION_IDS],
+      tiles: [...DASH_TILE_IDS],
+    };
   }
 
   // ---- helpers -----------------------------------------------------------
@@ -130,65 +226,16 @@ class ZroshuaCard extends HTMLElement {
     });
   }
 
-  /** Visible tile ids in display order. */
+  /** Section ids to render, in order (from Lovelace card config). */
+  _sectionLayout() {
+    const list = Array.isArray(this._config.sections) ? this._config.sections : DASH_SECTION_IDS;
+    return list.filter((id) => DASH_SECTION_IDS.includes(id));
+  }
+
+  /** Tile ids to render inside the tiles section. */
   _tileLayout() {
-    const prefs = this._tilePrefs();
-    const hidden = new Set(prefs.hidden || []);
-    return (prefs.order || [...DASH_TILE_IDS]).filter((id) => DASH_TILE_IDS.includes(id) && !hidden.has(id));
-  }
-
-  _tilePrefs() {
-    try {
-      const raw = localStorage.getItem(TILE_STORE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed?.order)) {
-          const order = parsed.order.filter((id) => DASH_TILE_IDS.includes(id));
-          for (const id of DASH_TILE_IDS) if (!order.includes(id)) order.push(id);
-          return { order, hidden: (parsed.hidden || []).filter((id) => DASH_TILE_IDS.includes(id)) };
-        }
-      }
-    } catch {
-      /* ignore */
-    }
-    if (Array.isArray(this._config.tiles)) {
-      const visible = this._config.tiles.filter((id) => DASH_TILE_IDS.includes(id));
-      const hidden = DASH_TILE_IDS.filter((id) => !visible.includes(id));
-      const order = [...visible, ...hidden];
-      return { order, hidden };
-    }
-    return { order: [...DASH_TILE_IDS], hidden: [...(this._config.hiddenTiles || [])] };
-  }
-
-  _saveTilePrefs(prefs) {
-    const order = (prefs.order || []).filter((id) => DASH_TILE_IDS.includes(id));
-    for (const id of DASH_TILE_IDS) if (!order.includes(id)) order.push(id);
-    const hidden = (prefs.hidden || []).filter((id) => DASH_TILE_IDS.includes(id));
-    const next = { order, hidden };
-    try {
-      localStorage.setItem(TILE_STORE_KEY, JSON.stringify(next));
-    } catch {
-      /* private mode */
-    }
-    // Persist into Lovelace card config when the dashboard can accept it.
-    const visible = order.filter((id) => !hidden.includes(id));
-    this._config = { ...this._config, tiles: visible, hiddenTiles: hidden };
-    this.dispatchEvent(
-      new CustomEvent('config-changed', { detail: { config: this._config }, bubbles: true, composed: true }),
-    );
-  }
-
-  _reorderTile(fromId, toId) {
-    if (!fromId || !toId || fromId === toId) return;
-    const prefs = this._tilePrefs();
-    const order = [...prefs.order];
-    const fi = order.indexOf(fromId);
-    const ti = order.indexOf(toId);
-    if (fi < 0 || ti < 0) return;
-    order.splice(fi, 1);
-    order.splice(ti, 0, fromId);
-    this._saveTilePrefs({ ...prefs, order });
-    this._render();
+    const list = Array.isArray(this._config.tiles) ? this._config.tiles : DASH_TILE_IDS;
+    return list.filter((id) => DASH_TILE_IDS.includes(id));
   }
   _fmtTime(ts) {
     return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -324,31 +371,6 @@ class ZroshuaCard extends HTMLElement {
       this._filter = el.dataset.filter;
       this._render();
     });
-    on('[data-tile-cfg]', () => {
-      this._tileCfg = true;
-      this._openAnim = true;
-      this._render();
-    });
-    on('[data-close-tile-cfg]', () => {
-      this._tileCfg = false;
-      this._render();
-    });
-    on('[data-tile-toggle]', (el) => {
-      const id = el.dataset.tileToggle;
-      const prefs = this._tilePrefs();
-      const hidden = new Set(prefs.hidden || []);
-      if (el.checked) hidden.delete(id);
-      else hidden.add(id);
-      // Keep at least one tile visible.
-      const visible = DASH_TILE_IDS.filter((t) => !hidden.has(t));
-      if (!visible.length) return;
-      this._saveTilePrefs({ order: prefs.order, hidden: [...hidden] });
-      this._render();
-    });
-    on('[data-tile-reset]', () => {
-      this._saveTilePrefs({ order: [...DASH_TILE_IDS], hidden: [] });
-      this._render();
-    });
     on('[data-edit-up]', (el) => {
       const i = Number(el.dataset.editUp);
       const u = (a.upcoming || []).filter((x) => x.ts > Date.now())[i];
@@ -444,34 +466,6 @@ class ZroshuaCard extends HTMLElement {
       this._render();
     });
 
-    // Tile drag-and-drop
-    card.querySelectorAll('[data-tile-id]').forEach((el) => {
-      el.ondragstart = (e) => {
-        this._dragTile = el.dataset.tileId;
-        this._didTileDrag = false;
-        e.dataTransfer.effectAllowed = 'move';
-        e.dataTransfer.setData('text/plain', el.dataset.tileId);
-        el.classList.add('dragging');
-      };
-      el.ondragend = () => {
-        el.classList.remove('dragging');
-        this._dragTile = null;
-        card.querySelectorAll('.tile.drag-over').forEach((x) => x.classList.remove('drag-over'));
-      };
-      el.ondragover = (e) => {
-        e.preventDefault();
-        this._didTileDrag = true;
-        e.dataTransfer.dropEffect = 'move';
-        el.classList.add('drag-over');
-      };
-      el.ondragleave = () => el.classList.remove('drag-over');
-      el.ondrop = (e) => {
-        e.preventDefault();
-        el.classList.remove('drag-over');
-        const from = e.dataTransfer.getData('text/plain') || this._dragTile;
-        this._reorderTile(from, el.dataset.tileId);
-      };
-    });
   }
 
   _chip(txt, cls = '', icon = '') {
@@ -515,7 +509,7 @@ class ZroshuaCard extends HTMLElement {
       .map((id) => {
         const t = tileData[id];
         if (!t) return '';
-        return `<div class="tile" draggable="true" data-tile-id="${id}" title="Drag to reorder">
+        return `<div class="tile">
           <span class="ti ${t.cls}">${t.icon}</span>
           <div class="grow"><span class="muted small">${t.label}</span><b>${t.value}</b>${
             t.sub ? `<div class="muted tiny">${t.sub}</div>` : ''
@@ -647,29 +641,22 @@ class ZroshuaCard extends HTMLElement {
       })
       .join('');
 
-    return `
-      <div class="pad dash">
-        <div class="dash-tools">
-          <span class="muted tiny">Drag tiles to reorder</span>
-          ${this._btn({ cls: 'ghost icon', data: 'data-tile-cfg', icon: I.gear, title: 'Choose tiles' })}
-        </div>
-        <div class="tiles tiles6">${tilesHtml || '<div class="muted">No tiles selected — open tile settings.</div>'}</div>
-
-        <div class="panel">
+    const blocks = {
+      tiles: tilesHtml
+        ? `<div class="tiles tiles6">${tilesHtml}</div>`
+        : `<div class="muted small" style="margin-bottom:10px">No info tiles selected — edit the card to choose tiles.</div>`,
+      now: `<div class="panel">
           <div class="sec top">Now</div>
           ${active || '<div class="muted">Nothing is watering right now.</div>'}
           ${queue ? `<div class="sec">Queue</div>${queue}` : ''}
-        </div>
-
-        <div class="panel">
+        </div>`,
+      upcoming: `<div class="panel">
           <div class="sec top">Upcoming waterings</div>
           <div class="muted tiny" style="margin-bottom:6px">Tap a row to edit schedule &amp; zone timings</div>
           ${upcoming || '<div class="muted">No scheduled waterings in the next 7 days.</div>'}
-        </div>
-
-        ${weatherBlock ? `<div class="panel">${weatherBlock}</div>` : ''}
-
-        <div class="panel">
+        </div>`,
+      weather: weatherBlock ? `<div class="panel">${weatherBlock}</div>` : '',
+      quick_actions: `<div class="panel">
           <div class="sec top">Quick actions</div>
           <div class="actions">
             ${this._btn({ cls: 'danger', data: 'data-stop-all', icon: I.stop, label: 'Stop all' })}
@@ -686,49 +673,29 @@ class ZroshuaCard extends HTMLElement {
           </div>
           ${pumps ? `<div class="pumps">${pumps}</div>` : ''}
           ${levels ? `<div class="levels">${levels}</div>` : ''}
-        </div>
-
-        <div class="panel">
+        </div>`,
+      manual_queue: `<div class="panel">
           <div class="sec top rowish"><span>Manual queue</span>
             ${mq.length ? this._btn({ cls: 'ghost', data: 'data-mq-clear', icon: I.x, label: 'Clear' }) : ''}
           </div>
           ${mqRows || '<div class="muted small">No manual runs queued. Tap a zone while watering to add more, or use Water now.</div>'}
-        </div>
-
-        <div class="panel">
+        </div>`,
+      journal: `<div class="panel">
           <div class="sec top">Journal</div>
           <div class="journal">${journal || '<div class="muted">No journal entries yet.</div>'}</div>
-        </div>
+        </div>`,
+    };
 
+    const body = this._sectionLayout()
+      .map((id) => blocks[id] || '')
+      .join('');
+
+    return `
+      <div class="pad dash">
+        ${body || '<div class="muted">No sections selected — edit this card in Lovelace and choose Dashboard sections.</div>'}
         ${this._sheet(a)}
-        ${this._tileCfgSheet()}
         ${this._scheduleSheet()}
       </div>`;
-  }
-
-  _tileCfgSheet() {
-    if (!this._tileCfg) return '';
-    const prefs = this._tilePrefs();
-    const hidden = new Set(prefs.hidden || []);
-    const anim = this._openAnim ? ' anim' : '';
-    this._openAnim = false;
-    const rows = DASH_TILES.map(
-      (t) => `<label class="tcfg-row">
-        <input type="checkbox" data-tile-toggle="${t.id}" ${hidden.has(t.id) ? '' : 'checked'} />
-        <span>${this._esc(t.label)}</span>
-      </label>`,
-    ).join('');
-    return `<div class="ovl" data-close-tile-cfg></div><div class="sheet sheet-wide${anim}">
-      <div class="shead">
-        <div class="grow"><b>Dashboard tiles</b><div class="muted small">Show / hide tiles. Drag tiles on the card to reorder.</div></div>
-        ${this._btn({ cls: 'ghost icon', data: 'data-close-tile-cfg', icon: I.x, title: 'Close' })}
-      </div>
-      <div class="tcfg">${rows}</div>
-      <div class="srow" style="margin-top:10px">
-        ${this._btn({ cls: 'ghost', data: 'data-tile-reset', label: 'Reset defaults' })}
-        ${this._btn({ cls: 'primary', data: 'data-close-tile-cfg', label: 'Done' })}
-      </div>
-    </div>`;
   }
 
   _scheduleSheet() {
@@ -1099,8 +1066,7 @@ const STYLE = `
   @container (min-width: 520px) { .tiles6 { grid-template-columns: repeat(3, 1fr); } }
   @container (min-width: 780px) { .tiles6 { grid-template-columns: repeat(6, 1fr); } }
   .tile { display: flex; align-items: center; gap: 10px; background: var(--secondary-background-color);
-    border-radius: 14px; padding: 10px 12px; min-width: 0; cursor: grab; user-select: none;
-    transition: box-shadow .12s, outline .12s; }
+    border-radius: 14px; padding: 10px 12px; min-width: 0; }
   .tile b { display: block; font-size: 1.05rem; line-height: 1.15; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .tile .tiny { margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .ti { width: 34px; height: 34px; border-radius: 10px; align-items: center; justify-content: center; flex-shrink: 0; }
@@ -1114,14 +1080,9 @@ const STYLE = `
     background: color-mix(in srgb, var(--secondary-background-color) 35%, transparent); }
   .sec.top { margin-top: 0; }
   .rowish { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-  .dash-tools { display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin-bottom: 6px; }
-  .tile.dragging { opacity: .55; cursor: grabbing; }
-  .tile.drag-over { outline: 2px solid var(--z-info); outline-offset: 1px; }
   .sheet-wide { width: min(520px, calc(100vw - 20px)); max-height: min(85vh, 720px); overflow: auto; }
-  .tcfg { display: flex; flex-direction: column; gap: 8px; }
   .tcfg-row { display: flex; align-items: center; gap: 10px; padding: 8px 4px; cursor: pointer;
     border-bottom: 1px solid var(--divider-color); font-weight: 600; }
-  .tcfg-row:last-child { border-bottom: 0; }
   .tcfg-row input { width: 18px; height: 18px; accent-color: var(--z-ok); }
   .dayrow { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
   .daychip { display: inline-flex; align-items: center; gap: 4px; padding: 5px 8px; border-radius: 999px;
@@ -1272,68 +1233,12 @@ const STYLE = `
   .tllegend { margin-top: 8px; }
 `;
 
-// Config editor: view, title, dashboard tiles
-class ZroshuaCardEditor extends HTMLElement {
-  setConfig(config) {
-    this._config = { view: 'dashboard', ...config };
-    this._render();
-  }
-  set hass(h) {
-    this._hass = h;
-  }
-  _render() {
-    if (!this.shadowRoot) this.attachShadow({ mode: 'open' });
-    const tiles = Array.isArray(this._config.tiles) ? this._config.tiles : [...DASH_TILE_IDS];
-    const hidden = new Set(DASH_TILE_IDS.filter((id) => !tiles.includes(id)));
-    const tileRows = DASH_TILES.map(
-      (t) =>
-        `<label class="t"><input type="checkbox" data-tile="${t.id}" ${hidden.has(t.id) ? '' : 'checked'}/> ${t.label}</label>`,
-    ).join('');
-    this.shadowRoot.innerHTML = `
-      <style>
-        .f { display: flex; flex-direction: column; gap: 10px; padding: 8px 0; }
-        label { font-size: .85rem; color: var(--secondary-text-color); }
-        select, input[type=text] { padding: 8px; border-radius: 8px; border: 1px solid var(--divider-color);
-          background: var(--card-background-color); color: var(--primary-text-color); }
-        .tiles { display: flex; flex-direction: column; gap: 6px; padding: 4px 0; }
-        .t { display: flex; align-items: center; gap: 8px; color: var(--primary-text-color); font-weight: 600; cursor: pointer; }
-        .hint { font-size: .75rem; color: var(--secondary-text-color); }
-      </style>
-      <div class="f">
-        <label>View</label>
-        <select id="view">${VIEWS.map((v) => `<option value="${v}" ${v === this._config.view ? 'selected' : ''}>${v}</option>`).join('')}</select>
-        <label>Title (optional)</label>
-        <input id="title" type="text" value="${this._config.title || ''}" />
-        <label>Dashboard tiles</label>
-        <div class="hint">Uncheck to hide. On the card, drag tiles to reorder (saved in the browser; also written to card config when possible).</div>
-        <div class="tiles">${tileRows}</div>
-      </div>`;
-    const emit = () => {
-      const visible = [...this.shadowRoot.querySelectorAll('[data-tile]:checked')].map((el) => el.dataset.tile);
-      const order = Array.isArray(this._config.tiles)
-        ? [...this._config.tiles.filter((id) => visible.includes(id)), ...visible.filter((id) => !(this._config.tiles || []).includes(id))]
-        : visible;
-      this._config = {
-        ...this._config,
-        view: this.shadowRoot.getElementById('view').value,
-        title: this.shadowRoot.getElementById('title').value || undefined,
-        tiles: order.length ? order : [...DASH_TILE_IDS],
-      };
-      this.dispatchEvent(new CustomEvent('config-changed', { detail: { config: this._config }, bubbles: true, composed: true }));
-    };
-    this.shadowRoot.getElementById('view').onchange = emit;
-    this.shadowRoot.getElementById('title').oninput = emit;
-    this.shadowRoot.querySelectorAll('[data-tile]').forEach((el) => (el.onchange = emit));
-  }
-}
-
 customElements.define('zroshua-card', ZroshuaCard);
-customElements.define('zroshua-card-editor', ZroshuaCardEditor);
 window.customCards = window.customCards || [];
 window.customCards.push({
   type: 'zroshua-card',
   name: 'Zroshua',
-  description: 'Irrigation dashboard, groups, zones, upcoming and timeline cards.',
-  preview: false,
+  description: 'Irrigation dashboard with configurable sections, groups, zones, upcoming and timeline.',
+  preview: true,
 });
 console.info('%c ZROSHUA-CARD ', 'background:#12b886;color:#fff;border-radius:3px', 'loaded');

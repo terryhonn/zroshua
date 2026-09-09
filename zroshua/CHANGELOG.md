@@ -1,13 +1,18 @@
 # Changelog
 
+## 0.4.16
+
+- **Lovelace Visual editor for the dashboard card.** Edit the card in Lovelace
+  to get a native form (like other HA cards): pick the hub entity, title, view,
+  then **Dashboard sections** and **Info tiles** as reorderable multi-select
+  lists — include/exclude and drag to set order. Layout is stored in the card
+  YAML (`sections` / `tiles`), not a gear menu on the card.
+
 ## 0.4.15
 
-- **Lovelace card: configurable tiles + schedule editing.** Gear / card editor
-  chooses which dashboard tiles show; drag tiles to reorder (saved in the
-  browser and card config). Tap an upcoming watering to edit that schedule —
-  enable/disable, days, start times, zone selection and per-zone minutes —
-  saved via MQTT `update_schedule` (same data as the add-on group/zone editors
-  for week-mode schedules).
+- **Lovelace card: schedule editing from upcoming.** Tap an upcoming watering
+  to edit that schedule — enable/disable, days, start times, zone selection and
+  per-zone minutes — saved via MQTT `update_schedule`.
 
 ## 0.4.14
 

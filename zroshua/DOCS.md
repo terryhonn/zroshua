@@ -232,9 +232,10 @@ A custom card (`custom:zroshua-card`) with five views — `dashboard`, `groups`,
 `upcoming`, `timeline`. The **dashboard** view mirrors the add-on Overview: info tiles
 (watering / zones / groups / today water & time / next), Now + queue (+5 min / stop),
 upcoming with skip/pause, weather, quick actions, pumps & barrel levels, manual queue,
-and a live journal. **Tiles** — gear on the card (or the Lovelace card editor) shows /
-hides tiles; drag tiles to reorder. **Upcoming** — tap a row to edit that schedule
-(days, start times, zone selection & minutes), same backing data as the add-on editors.
+and a live journal. **Layout** — edit the card in Lovelace (Visual) to pick the hub
+entity and choose which **sections** and **info tiles** appear, then drag to reorder
+(stored in card YAML as `sections` / `tiles`). **Upcoming** — tap a row to edit that
+schedule (days, start times, zone selection & minutes), same data as the add-on editors.
 With the Mosquitto add-on installed the add-on deploys the card to `/config/www` and
 registers the Lovelace resource automatically (YAML-mode dashboards: add
 `/local/zroshua-card.js` as a module resource yourself). Add it with
