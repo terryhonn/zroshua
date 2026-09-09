@@ -2,7 +2,7 @@ import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nest
 import { DataSource, Repository } from 'typeorm';
 import { DATA_SOURCE } from '../db/database.module';
 import { Group, GroupRule, Run, Schedule, WaterSource, Zone } from '../db/entities';
-import { ConfigService } from '../config/config.service';
+import { ConfigService, Controller } from '../config/config.service';
 import { HaService } from '../ha/ha.service';
 import { JournalService } from '../journal/journal.service';
 import { NotifyService } from '../notify/notify.service';
@@ -109,6 +109,7 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
   private groups: Group[] = [];
   private rules: GroupRule[] = [];
   private sources: WaterSource[] = [];
+  private controllers: Controller[] = [];
   private cacheLoadedAt = 0;
 
   // runtime state
@@ -172,8 +173,64 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
     this.groups = await this.groupsRepo.find({ order: { orderIndex: 'ASC' } });
     this.rules = await this.rulesRepo.find();
     this.sources = await this.sourcesRepo.find();
+    const settings = await this.config.getSettings();
+    this.controllers = settings.controllers ?? [];
     this.srcMutexPairs = this.buildSourceMutex();
     this.cacheLoadedAt = Date.now();
+  }
+
+  /**
+   * Online / degraded / offline for a configured controller.
+   * Prefers ESPHome status binary sensor (on = online); also checks entity availability.
+   */
+  private controllerStatus(c: Controller): {
+    id: string;
+    name: string;
+    status: 'ok' | 'degraded' | 'offline' | 'unknown';
+    detail: string;
+    statusEntity: string | null;
+    entities: string[];
+    unavailable: string[];
+  } {
+    const entities = c.entities ?? [];
+    const unavailable = entities.filter((e) => !this.ha.available(e));
+    const availN = entities.length - unavailable.length;
+
+    let statusOnline: boolean | null = null;
+    if (c.statusEntity) {
+      if (!this.ha.available(c.statusEntity)) statusOnline = false;
+      else statusOnline = this.ha.isOn(c.statusEntity);
+    }
+
+    let status: 'ok' | 'degraded' | 'offline' | 'unknown' = 'unknown';
+    let detail = '';
+
+    if (statusOnline === false) {
+      status = 'offline';
+      detail = c.statusEntity ? `${c.statusEntity} reports offline` : 'controller offline';
+    } else if (entities.length && availN === 0) {
+      status = 'offline';
+      detail = `all ${entities.length} entit${entities.length === 1 ? 'y' : 'ies'} unavailable`;
+    } else if (entities.length && unavailable.length > 0) {
+      status = 'degraded';
+      detail = `${unavailable.length}/${entities.length} unavailable: ${unavailable.join(', ')}`;
+    } else if (statusOnline === true || (entities.length > 0 && unavailable.length === 0)) {
+      status = 'ok';
+      detail = statusOnline === true ? 'online' : 'all entities available';
+    } else {
+      status = 'unknown';
+      detail = 'no status sensor or entities configured';
+    }
+
+    return {
+      id: c.id,
+      name: c.name,
+      status,
+      detail,
+      statusEntity: c.statusEntity ?? null,
+      entities,
+      unavailable,
+    };
   }
 
   private zone(id: string) { return this.zones.find((z) => z.id === id); }
@@ -2786,6 +2843,7 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
             levelPct: l !== null ? Math.round((l / s.capacityL!) * 100) : null,
           };
         }),
+      controllers: this.controllers.map((c) => this.controllerStatus(c)),
     };
   }
 

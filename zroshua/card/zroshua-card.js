@@ -22,6 +22,7 @@ const DASH_SECTIONS = [
   { id: 'now', label: 'Now & queue' },
   { id: 'upcoming', label: 'Upcoming waterings' },
   { id: 'weather', label: 'Weather' },
+  { id: 'controllers', label: 'Controllers' },
   { id: 'quick_actions', label: 'Quick actions' },
   { id: 'manual_queue', label: 'Manual queue' },
   { id: 'journal', label: 'Journal' },
@@ -725,6 +726,26 @@ class ZroshuaCard extends HTMLElement {
           ${upcoming || '<div class="muted">No scheduled waterings in the next 7 days.</div>'}
         </div>`,
       weather: weatherBlock ? `<div class="panel">${weatherBlock}</div>` : '',
+      controllers: (a.controllers || []).length
+        ? `<div class="panel">
+          <div class="sec top">Controllers</div>
+          <div class="pumps">${(a.controllers || [])
+            .map((c) => {
+              const cls =
+                c.status === 'ok' ? 'ok' : c.status === 'degraded' ? 'warn' : c.status === 'offline' ? 'danger' : 'muted';
+              const label =
+                c.status === 'ok'
+                  ? 'online'
+                  : c.status === 'degraded'
+                    ? 'degraded'
+                    : c.status === 'offline'
+                      ? 'offline'
+                      : 'unknown';
+              return this._chip(`${c.name || c.id}: ${label}`, cls);
+            })
+            .join('')}</div>
+          </div>`
+        : '',
       quick_actions: `<div class="panel">
           <div class="sec top">Quick actions</div>
           <div class="actions">

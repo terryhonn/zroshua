@@ -41,6 +41,20 @@ export type NotificationProvider =
 export type TempUnit = 'C' | 'F';
 export type VolumeUnit = 'L' | 'gal';
 
+/**
+ * Named irrigation controller (e.g. an ESPHome multi-relay board) to monitor.
+ * Prefer an ESPHome `binary_sensor` status (connectivity); entities are the
+ * switches/valves on that board used as a fallback / detail signal.
+ */
+export type Controller = {
+  id: string;
+  name: string;
+  /** Optional ESPHome status binary sensor (on = online). */
+  statusEntity: string | null;
+  /** Switch/valve entities on this controller (availability check). */
+  entities: string[];
+};
+
 export interface Settings {
   maxTotalFlowLpm: number | null;
   energyTariffPerKwh: number | null;
@@ -95,6 +109,8 @@ export interface Settings {
   externalOnPolicy: 'adopt' | 'turn_off';
   /** Alert when zone/pump entities are unavailable N minutes before a scheduled start. */
   preStartCheck: { enabled: boolean; minutes: number };
+  /** ESPHome / multi-relay boards to show as online/offline chips. */
+  controllers: Controller[];
 }
 
 export const defaultSettings: Settings = {
@@ -136,6 +152,7 @@ export const defaultSettings: Settings = {
   },
   externalOnPolicy: 'adopt',
   preStartCheck: { enabled: true, minutes: 30 },
+  controllers: [],
 };
 
 @Injectable()
@@ -171,6 +188,7 @@ export class ConfigService {
   async getSettings(): Promise<Settings> {
     const stored = await this.getKV<Partial<Settings>>('settings', {});
     const merged = { ...defaultSettings, ...stored } as Settings;
+    merged.controllers = Array.isArray(stored.controllers) ? stored.controllers : defaultSettings.controllers;
     // deep-merge nested blocks that gained keys after older configs were stored
     merged.notifications = {
       ...defaultSettings.notifications,

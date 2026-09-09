@@ -174,6 +174,15 @@ export interface EngineState {
   faults: string[];
   pumpStates: { sourceId: string; name: string; on: boolean }[];
   sourceLevels?: { sourceId: string; name: string; capacityL: number; levelL: number | null; levelPct: number | null }[];
+  controllers?: {
+    id: string;
+    name: string;
+    status: 'ok' | 'degraded' | 'offline' | 'unknown';
+    detail: string;
+    statusEntity: string | null;
+    entities: string[];
+    unavailable: string[];
+  }[];
 }
 
 export type TempUnit = 'C' | 'F';
@@ -219,6 +228,17 @@ export interface Settings {
   };
   externalOnPolicy: 'adopt' | 'turn_off';
   preStartCheck: { enabled: boolean; minutes: number };
+  /** Named ESPHome / multi-relay boards to monitor (online/offline chips). */
+  controllers: Controller[];
+}
+
+export interface Controller {
+  id: string;
+  name: string;
+  /** ESPHome status binary sensor (on = online), optional. */
+  statusEntity: string | null;
+  /** Switch/valve entities on this controller. */
+  entities: string[];
 }
 
 export interface SoilTrigger {

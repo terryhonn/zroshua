@@ -17,9 +17,9 @@ import {
 } from '@mantine/core';
 import { IconTrash } from '@tabler/icons-react';
 import { notifications } from '@mantine/notifications';
-import { api, Group as ZGroup, NotificationProvider, Settings } from '../api';
+import { api, Controller, Group as ZGroup, NotificationProvider, Settings } from '../api';
 import { useResource } from '../hooks';
-import { EntitySelect, SliderInput } from '../components/common';
+import { EntityMultiSelect, EntitySelect, SliderInput } from '../components/common';
 import { LANG_OPTIONS, setLang, storedLang, t } from '../i18n';
 import { HintLabel, HintTitle } from '../components/Hint';
 import { TempUnit, VolumeUnit, displayFlow, displayTemp, flowSuffix, tempSuffix, toStoredC, toStoredL } from '../units';
@@ -66,7 +66,7 @@ export default function SettingsPage() {
   const [testing, setTesting] = useState<string | null>(null);
 
   useEffect(() => {
-    if (settings) setS(settings);
+    if (settings) setS({ ...settings, controllers: settings.controllers ?? [] });
   }, [settings]);
 
   if (!s) return null;
@@ -554,6 +554,97 @@ export default function SettingsPage() {
               {t('Add HA notify')}
             </Button>
           </Group>
+        </Stack>
+      </Card>
+
+      <Card withBorder>
+        <Title order={4} mb="sm">
+          {t('Controllers')}
+        </Title>
+        <Text size="sm" c="dimmed" mb="sm">
+          {t(
+            'ESPHome multi-relay boards (or any controllers) to show as online/offline on the dashboard. Prefer an ESPHome status binary sensor; list the switch/valve entities on that board as a fallback.',
+          )}
+        </Text>
+        <Stack>
+          {(s.controllers ?? []).map((c, i) => (
+            <Card key={c.id} withBorder p="sm">
+              <Group justify="space-between" mb="xs" align="flex-start">
+                <TextInput
+                  style={{ flex: 1 }}
+                  label={t('Name')}
+                  value={c.name}
+                  onChange={(e) => {
+                    const controllers = [...(s.controllers ?? [])];
+                    controllers[i] = { ...c, name: e.target.value };
+                    setS({ ...s, controllers });
+                  }}
+                />
+                <ActionIcon
+                  variant="subtle"
+                  color="red"
+                  mt={22}
+                  onClick={() =>
+                    setS({ ...s, controllers: (s.controllers ?? []).filter((_, j) => j !== i) })
+                  }
+                >
+                  <IconTrash size={16} />
+                </ActionIcon>
+              </Group>
+              <EntitySelect
+                label={
+                  <HintLabel
+                    label={t('Status sensor')}
+                    hint={t('ESPHome binary_sensor status (on = online). Optional but recommended.')}
+                  />
+                }
+                value={c.statusEntity}
+                onChange={(v) => {
+                  const controllers = [...(s.controllers ?? [])];
+                  controllers[i] = { ...c, statusEntity: v };
+                  setS({ ...s, controllers });
+                }}
+                domains={['binary_sensor']}
+              />
+              <div style={{ marginTop: 8 }}>
+                <EntityMultiSelect
+                  label={
+                    <HintLabel
+                      label={t('Entities on this controller')}
+                      hint={t('Switches/valves belonging to this board — used if any go unavailable.')}
+                    />
+                  }
+                  value={c.entities}
+                  onChange={(v) => {
+                    const controllers = [...(s.controllers ?? [])];
+                    controllers[i] = { ...c, entities: v };
+                    setS({ ...s, controllers });
+                  }}
+                  domains={['switch', 'valve', 'light', 'input_boolean']}
+                />
+              </div>
+            </Card>
+          ))}
+          <Button
+            variant="light"
+            w={200}
+            onClick={() =>
+              setS({
+                ...s,
+                controllers: [
+                  ...(s.controllers ?? []),
+                  {
+                    id: `ctrl_${Date.now().toString(36)}`,
+                    name: '',
+                    statusEntity: null,
+                    entities: [],
+                  } as Controller,
+                ],
+              })
+            }
+          >
+            {t('Add controller')}
+          </Button>
         </Stack>
       </Card>
 

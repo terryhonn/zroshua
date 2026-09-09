@@ -483,6 +483,7 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
       queue: snapshot.queue,
       manualQueue: snapshot.manualQueue ?? [],
       pumpStates: snapshot.pumpStates ?? [],
+      controllers: snapshot.controllers ?? [],
       upcoming,
       timeline,
       timelineEnv,

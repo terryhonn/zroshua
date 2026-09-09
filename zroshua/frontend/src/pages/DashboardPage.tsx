@@ -751,6 +751,35 @@ export default function DashboardPage({ state, journalTick = 0 }: { state: Engin
               )}
             </Card>
 
+            {(state?.controllers?.length ?? 0) > 0 && (
+              <Card withBorder>
+                <Title order={4} mb="sm">
+                  {t('Controllers')}
+                </Title>
+                <Group gap="xs" wrap="wrap">
+                  {state!.controllers!.map((c) => {
+                    const color =
+                      c.status === 'ok' ? 'teal' : c.status === 'degraded' ? 'yellow' : c.status === 'offline' ? 'red' : 'gray';
+                    const label =
+                      c.status === 'ok'
+                        ? t('online')
+                        : c.status === 'degraded'
+                          ? t('degraded')
+                          : c.status === 'offline'
+                            ? t('offline')
+                            : t('unknown');
+                    return (
+                      <Tooltip key={c.id} label={c.detail || label} multiline maw={320}>
+                        <Badge color={color} variant="light" leftSection={<span style={{ fontSize: 10 }}>●</span>}>
+                          {c.name || c.id}: {label}
+                        </Badge>
+                      </Tooltip>
+                    );
+                  })}
+                </Group>
+              </Card>
+            )}
+
             <Card withBorder>
               <Title order={4} mb="sm">
                 {t('Quick actions')}

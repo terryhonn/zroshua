@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.20
+
+- **Controllers status strip.** Settings → Controllers: name each ESPHome (or other)
+  multi-relay board, optional status binary sensor, and its switch/valve entities.
+  Dashboard and Lovelace card show green / yellow / red chips (online / degraded /
+  offline). Prefers ESPHome `binary_sensor` status when set; otherwise entity
+  availability. Add **Controllers** in the card’s Dashboard sections list to show
+  it on Lovelace.
+
 ## 0.4.19
 
 - **Fix: dialogs truly centered** (fixed `top/left: 50%` positioning). 0.4.18
