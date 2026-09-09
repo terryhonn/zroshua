@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.19
+
+- **Fix: dialogs truly centered** (fixed `top/left: 50%` positioning). 0.4.18
+  intended this but the sheet markup needed a follow-up CSS fix.
+
 ## 0.4.18
 
 - **Lovelace card dialogs centered** on screen (schedule edit, add-to-queue,
