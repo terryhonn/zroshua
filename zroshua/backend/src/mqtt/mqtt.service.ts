@@ -5,6 +5,8 @@ import { DATA_SOURCE } from '../db/database.module';
 import { Run, Zone } from '../db/entities';
 import { ConfigService } from '../config/config.service';
 import { EngineService } from '../engine/engine.service';
+import { JournalService } from '../journal/journal.service';
+import { WeatherService } from '../weather/weather.service';
 import { env } from '../env';
 import { fromStoredL, VolumeUnit } from '../units/volume';
 import { ADDON_VERSION } from '../version';
@@ -38,6 +40,8 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
     @Inject(DATA_SOURCE) ds: DataSource,
     private readonly config: ConfigService,
     private readonly engine: EngineService,
+    private readonly journal: JournalService,
+    private readonly weather: WeatherService,
   ) {
     this.runs = ds.getRepository(Run);
   }
@@ -328,11 +332,23 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
-    await this.publishHub(snapshot, zones, liters, kwh, volUnit);
+    const minutesToday = Math.round(
+      rows
+        .filter((r) => r.category !== 'tail')
+        .reduce((acc, r) => acc + (r.endTs && r.startTs ? (r.endTs - r.startTs) / 60_000 : 0), 0),
+    );
+    await this.publishHub(snapshot, zones, liters, kwh, volUnit, minutesToday);
   }
 
   /** Full snapshot for the Lovelace card: compact state + rich json attributes. */
-  private async publishHub(snapshot: any, zones: Zone[], litersToday: number, kwhToday: number, volUnit: VolumeUnit = 'L') {
+  private async publishHub(
+    snapshot: any,
+    zones: Zone[],
+    litersToday: number,
+    kwhToday: number,
+    volUnit: VolumeUnit = 'L',
+    minutesToday = 0,
+  ) {
     const groups = await this.config.groups.find({ order: { orderIndex: 'ASC' } });
     const settings = await this.config.getSettings();
     const activeZoneIds = new Set(snapshot.active.map((a: any) => a.zoneId));
@@ -371,6 +387,40 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
     }));
 
     const waterToday = fromStoredL(litersToday, volUnit);
+    const zoneById = new Map(zones.map((z) => [z.id, z]));
+    const groupById = new Map(groups.map((g) => [g.id, g]));
+    const journalRows = await this.journal.list(25);
+    const journal = journalRows.map((e) => ({
+      id: e.id,
+      ts: e.ts,
+      kind: e.kind,
+      code: e.code,
+      detail: e.detail,
+      zoneId: e.zoneId,
+      groupId: e.groupId,
+      target:
+        (e.zoneId && zoneById.get(e.zoneId)?.name) ||
+        (e.groupId && groupById.get(e.groupId)?.name) ||
+        null,
+    }));
+    let weather: any = null;
+    try {
+      const w = await this.weather.currentWeather();
+      weather = {
+        entity: w.entity,
+        condition: w.condition,
+        temperatureC: w.temperature,
+        humidity: w.humidity,
+        forecast: (w.forecast ?? []).slice(0, 7).map((f: any) => ({
+          tempMaxC: f.tempMaxC ?? null,
+          precipProb: f.precipitationProbability ?? null,
+          condition: f.condition ?? null,
+        })),
+      };
+    } catch {
+      weather = null;
+    }
+    const tempUnit = settings.tempUnit === 'F' ? 'F' : 'C';
     const attrs = {
       updated: new Date().toISOString(),
       paused: snapshot.paused,
@@ -378,15 +428,29 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
       haConnected: snapshot.haConnected,
       /** Display-unit volume for today (L or gal per volumeUnit). */
       litersToday: volUnit === 'gal' ? Math.round(waterToday * 10) / 10 : Math.round(waterToday),
+      minutesToday,
       volumeUnit: volUnit,
+      tempUnit,
       kwhToday: +kwhToday.toFixed(2),
       currency: settings.energyCurrency,
       active: snapshot.active,
       queue: snapshot.queue,
+      manualQueue: snapshot.manualQueue ?? [],
+      pumpStates: snapshot.pumpStates ?? [],
       upcoming,
       timeline,
       timelineEnv,
-      sourceLevels: (snapshot as any).sourceLevels ?? [],
+      journal,
+      weather,
+      sourceLevels: ((snapshot as any).sourceLevels ?? []).map((l: any) => ({
+        ...l,
+        levelDisplay:
+          l.levelL != null
+            ? volUnit === 'gal'
+              ? Math.round(fromStoredL(l.levelL, 'gal') * 10) / 10
+              : Math.round(l.levelL)
+            : null,
+      })),
       zones: zones.map((z) => {
         const run = snapshot.active.find((a: any) => a.zoneId === z.id);
         return {
@@ -471,6 +535,8 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
         return void (await this.engine.startZoneManual(cmd.zoneId, cmd.minutes));
       case 'stop_zone':
         return void (await this.engine.stopZone(cmd.zoneId, 'manual_stop'));
+      case 'extend_zone':
+        return void (await this.engine.extendZone(cmd.zoneId, Number(cmd.minutes) || 5));
       case 'run_group': {
         const g = await this.config.groups.findOneBy({ id: cmd.groupId });
         if (g) await this.engine.startGroupRun(g, 'manual', cmd.minutes);
@@ -489,6 +555,10 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
         return void (await this.engine.setZonePause(cmd.zoneId, Number(cmd.hours) || 0));
       case 'auto_allow_zone':
         return void (await this.engine.setZoneAutoAllow(cmd.zoneId, cmd.allow !== false));
+      case 'manual_queue_remove':
+        return void (await this.engine.removeManualQueueItem(cmd.key));
+      case 'manual_queue_clear':
+        return void (await this.engine.clearManualQueue());
       default:
         this.log.warn(`unknown command action: ${cmd?.action}`);
     }

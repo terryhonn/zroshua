@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.14
+
+- **Lovelace dashboard card** mirrors the add-on Overview: six info tiles,
+  Now with +5 min / stop, queue, upcoming (skip/pause), weather + forecast,
+  quick actions, pumps & barrel levels, manual queue, and journal. Hub MQTT
+  attrs now include journal, weather, minutes today, pumps, and manual queue;
+  new commands `extend_zone`, `manual_queue_remove`, `manual_queue_clear`.
+
 ## 0.4.13
 
 - **Fix: sequential zones bouncing mid-run (retry 96/3).** Two bugs stacked

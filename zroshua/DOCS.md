@@ -229,12 +229,14 @@ system events.
 ## Lovelace cards
 
 A custom card (`custom:zroshua-card`) with five views — `dashboard`, `groups`, `zones`,
-`upcoming`, `timeline` — lets you run groups/zones, watch the current watering, the queue,
-upcoming runs and today's timeline straight from a Home Assistant dashboard. With the
-Mosquitto add-on installed the add-on deploys the card to `/config/www` and registers the
-Lovelace resource automatically (YAML-mode dashboards: add `/local/zroshua-card.js` as a
-module resource yourself). Add it to a view with `type: custom:zroshua-card`, `view: groups`.
-The card reads `sensor.zroshua_state` and sends commands via the `mqtt.publish` service.
+`upcoming`, `timeline`. The **dashboard** view mirrors the add-on Overview: info tiles
+(watering / zones / groups / today water & time / next), Now + queue (+5 min / stop),
+upcoming with skip/pause, weather, quick actions, pumps & barrel levels, manual queue,
+and a live journal. With the Mosquitto add-on installed the add-on deploys the card to
+`/config/www` and registers the Lovelace resource automatically (YAML-mode dashboards:
+add `/local/zroshua-card.js` as a module resource yourself). Add it to a view with
+`type: custom:zroshua-card` (default `view: dashboard`). The card reads
+`sensor.zroshua_state` and sends commands via `mqtt.publish` on `zroshua/command`.
 
 ## MQTT discovery (native HA entities)
 

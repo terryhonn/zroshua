@@ -33,6 +33,10 @@ const I = {
   seq: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 12h12m0 0-4-4m4 4-4 4"/></svg>',
   par: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 5v14M16 5v14"/></svg>',
   x: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+  plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
+  plant: '<svg viewBox="0 0 24 24"><path d="M12 21v-8M12 13c0-4-3-6-7-6 0 4 3 6 7 6zm0 0c0-4 3-6 7-6 0 4-3 6-7 6z"/></svg>',
+  group: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>',
+  bucket: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 8h12l-1.2 11.2a2 2 0 0 1-2 1.8H9.2a2 2 0 0 1-2-1.8L6 8zm-1-3h14"/></svg>',
 };
 const zoneIcon = (type) =>
   type === 'drip' ? I.drop : type === 'beds' ? I.sprout : I.sprinkler;
@@ -109,8 +113,49 @@ class ZroshuaCard extends HTMLElement {
     const m = Math.max(0, Math.round((ts - Date.now()) / 60000));
     return m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m left` : `${m}m left`;
   }
+  _fmtMin(m) {
+    const n = Math.max(0, Math.round(Number(m) || 0));
+    if (n >= 60) return `${Math.floor(n / 60)}h ${n % 60}m`;
+    return `${n} min`;
+  }
+  _fmtTemp(c, unit = 'C') {
+    if (c == null || Number.isNaN(Number(c))) return '—';
+    const v = unit === 'F' ? (Number(c) * 9) / 5 + 32 : Number(c);
+    return `${Math.round(v)}°${unit}`;
+  }
+  _volUnit(a) {
+    return a.volumeUnit === 'gal' ? 'gal' : 'L';
+  }
   _esc(s) {
     return String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  }
+  _kindLabel(kind) {
+    return (
+      {
+        run_start: 'Started',
+        run_end: 'Ended',
+        skip: 'Skipped',
+        fault: 'Fault',
+        stop_rain: 'Rain stop',
+        info: 'Info',
+        adjust: 'Adjust',
+        system: 'System',
+      }[kind] || kind
+    );
+  }
+  _kindCls(kind) {
+    return (
+      {
+        run_start: 'ok',
+        run_end: 'accent',
+        skip: 'warn',
+        fault: 'danger',
+        stop_rain: 'warn',
+        info: 'muted',
+        adjust: 'accent',
+        system: 'muted',
+      }[kind] || 'muted'
+    );
   }
   _btn({ cls = '', data = '', icon = '', label = '', disabled = false, title = '' }) {
     return `<button class="btn ${cls}" ${data} ${disabled ? 'disabled' : ''} title="${this._esc(title)}">
@@ -164,6 +209,9 @@ class ZroshuaCard extends HTMLElement {
     });
     on('[data-stop-all]', () => this._cmd('stop_all'));
     on('[data-pause-all]', (el) => this._cmd('pause', { hours: Number(el.dataset.pauseAll) }));
+    on('[data-extend-zone]', (el) => this._cmd('extend_zone', { zoneId: el.dataset.extendZone, minutes: Number(el.dataset.min) || 5 }));
+    on('[data-mq-remove]', (el) => this._cmd('manual_queue_remove', { key: el.dataset.mqRemove }));
+    on('[data-mq-clear]', () => this._cmd('manual_queue_clear'));
     on('[data-pause-group]', (el) => {
       this._cmd('pause_group', { groupId: el.dataset.pauseGroup, hours: Number(el.dataset.hours) });
     });
@@ -194,40 +242,195 @@ class ZroshuaCard extends HTMLElement {
   // ---- views -------------------------------------------------------------
 
   _view_dashboard(a) {
+    const vol = this._volUnit(a);
+    const tempUnit = a.tempUnit === 'F' ? 'F' : 'C';
+    const zones = a.zones || [];
+    const groups = a.groups || [];
+    const enabledZones = zones.filter((z) => z.enabled).length;
+    const enabledGroups = groups.filter((g) => g.enabled).length;
+    const nextList = (a.upcoming || []).filter((u) => u.ts > Date.now()).slice(0, 6);
+    const next = nextList[0];
+
+    const tile = (label, value, sub, icon, cls = '') =>
+      `<div class="tile"><span class="ti ${cls}">${icon}</span><div class="grow"><span class="muted small">${label}</span><b>${value}</b>${
+        sub ? `<div class="muted tiny">${sub}</div>` : ''
+      }</div></div>`;
+
     const active = (a.active || [])
       .map((r) => {
         const pct = Math.round((r.progress || 0) * 100);
-        return `<div class="row tap" data-zone-sel="${this._esc(r.zoneId)}"><div class="grow"><b>${this._esc(r.zoneName)}</b> ${this._chip(r.triggeredBy)}
-          <div class="bar"><div style="width:${pct}%"></div></div></div>
+        return `<div class="row tap" data-zone-sel="${this._esc(r.zoneId)}">
+          <div class="grow"><b>${this._esc(r.zoneName)}</b> ${this._chip(r.triggeredBy)}
+            <div class="bar"><div style="width:${pct}%"></div></div></div>
           <span class="muted small">${this._left(r.endsAt)}</span>
-          ${this._btn({ cls: 'danger icon', data: `data-stop-zone="${this._esc(r.zoneId)}"`, icon: I.stop, title: 'Stop' })}</div>`;
+          ${this._btn({ cls: 'ghost icon', data: `data-extend-zone="${this._esc(r.zoneId)}" data-min="5"`, icon: I.plus, title: '+5 min' })}
+          ${this._btn({ cls: 'danger icon', data: `data-stop-zone="${this._esc(r.zoneId)}"`, icon: I.stop, title: 'Stop' })}
+        </div>`;
       })
       .join('');
+
     const queue = (a.queue || [])
-      .map((q) => `<div class="row small tap" data-zone-sel="${this._esc(q.zoneId)}"><span class="grow">${this._esc(q.zoneName)} &mdash; ${Math.round(q.durationMin)} min</span>${this._chip(q.waitReason, 'muted')}</div>`)
+      .map(
+        (q) =>
+          `<div class="row small tap" data-zone-sel="${this._esc(q.zoneId)}"><span class="grow">${this._esc(q.zoneName)} &mdash; ${Math.round(
+            q.durationMin,
+          )} min</span>${this._chip(q.waitReason, 'muted')}</div>`,
+      )
       .join('');
-    const next = (a.upcoming || []).filter((u) => u.ts > Date.now())[0];
-    const tile = (label, value, icon, cls = '') =>
-      `<div class="tile"><span class="ti ${cls}">${icon}</span><div><span class="muted small">${label}</span><b>${value}</b></div></div>`;
+
+    const upcoming = nextList
+      .map((u) => {
+        const dim = u.willSkip || u.paused ? 'dim' : '';
+        const kindAttr = u.kind === 'zone' ? 'data-pause-zone' : 'data-pause-group';
+        const target = u.kind === 'zone' ? u.targetId : u.groupId;
+        const skipHours = Math.max(0.05, (u.ts + 60000 - Date.now()) / 3600000);
+        const pauseBtn = u.paused
+          ? this._btn({ cls: 'ghost icon', data: `${kindAttr}="${this._esc(target)}" data-hours="0"`, icon: I.play, title: 'Resume' })
+          : this._btn({
+              cls: 'ghost icon',
+              data: `${kindAttr}="${this._esc(target)}" data-hours="${skipHours}"`,
+              icon: I.pause,
+              title: 'Skip this run',
+            });
+        const badge = u.paused
+          ? this._chip('paused', 'warn', I.pause)
+          : u.willSkip
+            ? this._chip(u.skipReason ? `will skip: ${u.skipReason}` : 'will skip', 'danger', I.warn)
+            : u.maybeSkip
+              ? this._chip(`may skip: ${u.maybeSkip}`, 'warn')
+              : '';
+        const zonesTxt = (u.zones || []).join(', ');
+        return `<div class="uprow ${dim}">
+          <div class="uptop">
+            <div class="grow">
+              <div class="upname"><b>${this._esc(u.groupName)}</b>${u.kind === 'zone' ? ' <span class="ztag">zone</span>' : ''}</div>
+              ${zonesTxt && u.kind !== 'zone' ? `<div class="muted small">${this._esc(zonesTxt)}</div>` : ''}
+              ${badge}
+            </div>
+            <div class="upmeta">
+              <span class="muted small nowrap">${u.minutes != null ? `${u.minutes}m` : ''}</span>
+              ${this._chip(this._countdown(u.ts), 'accent')}
+              <span class="muted small nowrap">${this._fmtTime(u.ts)}</span>
+              ${pauseBtn}
+            </div>
+          </div>
+        </div>`;
+      })
+      .join('');
+
+    const w = a.weather;
+    const forecast = ((w && w.forecast) || [])
+      .slice(0, 7)
+      .map((f, i) => {
+        const day = new Date(Date.now() + i * 86400000).toLocaleDateString([], { weekday: 'short' });
+        return `<div class="fc"><span class="muted tiny">${day}</span><b>${this._fmtTemp(f.tempMaxC, tempUnit)}</b><span class="tiny info">${
+          f.precipProb != null ? `${f.precipProb}%` : ''
+        }</span></div>`;
+      })
+      .join('');
+    const weatherBlock = w?.entity
+      ? `<div class="sec">Weather</div>
+         <div class="wx"><b class="wx-temp">${this._fmtTemp(w.temperatureC, tempUnit)}</b>
+           <span class="muted">${this._esc(w.condition || '')}</span>
+           ${w.humidity != null ? `<span class="muted">💧 ${w.humidity}%</span>` : ''}
+         </div>
+         <div class="fcgrid">${forecast}</div>`
+      : '';
+
+    const pumps = (a.pumpStates || [])
+      .map((p) => this._chip(p.on ? `pump ${p.name}: ON` : `pump ${p.name}: off`, p.on ? 'ok' : 'muted'))
+      .join('');
+    const levels = (a.sourceLevels || [])
+      .map((l) => {
+        const pct = l.levelPct ?? 0;
+        const col = pct < 20 ? 'danger' : pct < 40 ? 'warn' : 'idle';
+        const label =
+          l.levelDisplay != null ? `~${l.levelDisplay} ${vol} (${pct}%)` : l.levelPct != null ? `${pct}%` : '—';
+        return `<div class="lvl"><div class="lvlh"><span class="muted small">${this._esc(l.name)}</span><span class="muted tiny">${label}</span></div>
+          <div class="bar"><div class="${col}" style="width:${pct}%"></div></div></div>`;
+      })
+      .join('');
+
+    const mq = a.manualQueue || [];
+    const mqRows = mq
+      .map(
+        (q) =>
+          `<div class="row small"><span class="grow">${this._chip(`#${q.position}`, 'muted')} <b>${this._esc(q.zoneName)}</b>
+            <span class="muted small"> · ${Math.round(q.durationMin)}m${q.waitReason ? ` · ${this._esc(q.waitReason)}` : ''}</span></span>
+            ${this._btn({ cls: 'ghost icon', data: `data-mq-remove="${this._esc(q.key)}"`, icon: I.x, title: 'Remove from queue' })}</div>`,
+      )
+      .join('');
+
+    const journal = (a.journal || [])
+      .slice(0, 12)
+      .map((e) => {
+        const when = new Date(e.ts).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+        return `<div class="jrow">
+          <div class="grow">
+            ${this._chip(this._kindLabel(e.kind) + (e.code ? `: ${e.code}` : ''), this._kindCls(e.kind))}
+            ${e.target ? `<b class="jtarget">${this._esc(e.target)}</b>` : ''}
+            ${e.detail ? `<div class="muted small jdetail">${this._esc(e.detail)}</div>` : ''}
+          </div>
+          <span class="muted tiny nowrap">${when}</span>
+        </div>`;
+      })
+      .join('');
+
     return `
-      <div class="pad">
-        <div class="tiles">
-          ${tile('Watering', String((a.active || []).length), I.drop, 'ok')}
-          ${tile('Queued', String((a.queue || []).length), I.queue, 'warn')}
-          ${tile('Today', `${a.litersToday ?? 0} ${a.volumeUnit === 'gal' ? 'gal' : 'L'}`, I.sprinkler, 'idle')}
-          ${tile('Next', next ? this._countdown(next.ts) : '—', I.clock, 'accent')}
+      <div class="pad dash">
+        <div class="tiles tiles6">
+          ${tile('Watering now', String((a.active || []).length), (a.queue || []).length ? `${a.queue.length} queued` : '', I.drop, 'ok')}
+          ${tile('Zones', `${enabledZones}/${zones.length}`, 'enabled / total', I.plant, 'ok')}
+          ${tile('Groups', String(groups.length), `${enabledGroups} enabled`, I.group, 'accent')}
+          ${tile('Today water', `${a.litersToday ?? 0} ${vol}`, '', I.bucket, 'idle')}
+          ${tile('Today time', this._fmtMin(a.minutesToday ?? 0), 'completed runs', I.clock, 'warn')}
+          ${tile('Next watering', next ? this._countdown(next.ts) : '—', next ? `${this._fmtTime(next.ts)} · ${this._esc(next.groupName)}` : '', I.clock, 'accent')}
         </div>
-        <div class="sec">Now</div>
-        ${active || '<div class="muted">Nothing is watering.</div>'}
-        ${queue ? `<div class="sec">Queue</div>${queue}` : ''}
-        <div class="actions">
-          ${this._btn({ cls: 'danger', data: 'data-stop-all', icon: I.stop, label: 'Stop all' })}
-          ${
-            a.snoozeUntil
-              ? this._btn({ cls: 'ghost', data: 'data-pause-all="0"', icon: I.play, label: `Resume (paused till ${this._fmtTime(a.snoozeUntil)})` })
-              : this._btn({ cls: 'ghost', data: 'data-pause-all="24"', icon: I.pause, label: 'Pause 24h' })
-          }
+
+        <div class="panel">
+          <div class="sec top">Now</div>
+          ${active || '<div class="muted">Nothing is watering right now.</div>'}
+          ${queue ? `<div class="sec">Queue</div>${queue}` : ''}
         </div>
+
+        <div class="panel">
+          <div class="sec top">Upcoming waterings</div>
+          ${upcoming || '<div class="muted">No scheduled waterings in the next 7 days.</div>'}
+        </div>
+
+        ${weatherBlock ? `<div class="panel">${weatherBlock}</div>` : ''}
+
+        <div class="panel">
+          <div class="sec top">Quick actions</div>
+          <div class="actions">
+            ${this._btn({ cls: 'danger', data: 'data-stop-all', icon: I.stop, label: 'Stop all' })}
+            ${
+              a.snoozeUntil
+                ? this._btn({
+                    cls: 'ghost',
+                    data: 'data-pause-all="0"',
+                    icon: I.play,
+                    label: `Resume (paused till ${this._fmtTime(a.snoozeUntil)})`,
+                  })
+                : this._btn({ cls: 'ghost', data: 'data-pause-all="24"', icon: I.pause, label: 'Pause 24h' })
+            }
+          </div>
+          ${pumps ? `<div class="pumps">${pumps}</div>` : ''}
+          ${levels ? `<div class="levels">${levels}</div>` : ''}
+        </div>
+
+        <div class="panel">
+          <div class="sec top rowish"><span>Manual queue</span>
+            ${mq.length ? this._btn({ cls: 'ghost', data: 'data-mq-clear', icon: I.x, label: 'Clear' }) : ''}
+          </div>
+          ${mqRows || '<div class="muted small">No manual runs queued. Tap a zone while watering to add more, or use Water now.</div>'}
+        </div>
+
+        <div class="panel">
+          <div class="sec top">Journal</div>
+          <div class="journal">${journal || '<div class="muted">No journal entries yet.</div>'}</div>
+        </div>
+
         ${this._sheet(a)}
       </div>`;
   }
@@ -510,19 +713,46 @@ const STYLE = `
 
   .bar { height: 6px; border-radius: 4px; background: var(--divider-color); margin-top: 6px; overflow: hidden; }
   .bar div { height: 100%; background: linear-gradient(90deg, #14c08c, #0b9e74); }
+  .bar div.warn { background: linear-gradient(90deg, #fcc419, #f59f00); }
+  .bar div.danger { background: linear-gradient(90deg, #ff8787, #fa5252); }
+  .bar div.idle { background: linear-gradient(90deg, #74c0fc, #4dabf7); }
 
   /* dashboard tiles */
   .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; margin-bottom: 10px; }
+  .tiles6 { grid-template-columns: repeat(2, 1fr); }
+  @container (min-width: 520px) { .tiles6 { grid-template-columns: repeat(3, 1fr); } }
+  @container (min-width: 780px) { .tiles6 { grid-template-columns: repeat(6, 1fr); } }
   .tile { display: flex; align-items: center; gap: 10px; background: var(--secondary-background-color);
-    border-radius: 14px; padding: 10px 12px; }
-  .tile b { display: block; font-size: 1.15rem; line-height: 1.15; }
+    border-radius: 14px; padding: 10px 12px; min-width: 0; }
+  .tile b { display: block; font-size: 1.05rem; line-height: 1.15; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tile .tiny { margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .ti { width: 34px; height: 34px; border-radius: 10px; align-items: center; justify-content: center; flex-shrink: 0; }
   .ti svg { width: 18px; height: 18px; fill: currentColor; }
   .ti.ok { background: color-mix(in srgb, var(--z-ok) 16%, transparent); color: var(--z-ok); }
   .ti.warn { background: color-mix(in srgb, var(--z-warn) 16%, transparent); color: var(--z-warn); }
   .ti.idle { background: color-mix(in srgb, var(--z-info) 16%, transparent); color: var(--z-info); }
   .ti.accent { background: color-mix(in srgb, var(--z-accent) 16%, transparent); color: var(--z-accent); }
-  .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+  .dash .panel { border: 1px solid var(--divider-color); border-radius: 14px; padding: 10px 12px 12px; margin-bottom: 10px;
+    background: color-mix(in srgb, var(--secondary-background-color) 35%, transparent); }
+  .sec.top { margin-top: 0; }
+  .rowish { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .tiny { font-size: .72rem; }
+  .info { color: var(--z-info); }
+  .wx { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+  .wx-temp { font-size: 1.45rem; }
+  .fcgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(42px, 1fr)); gap: 4px; }
+  .fc { display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 4px 2px;
+    border-radius: 8px; background: color-mix(in srgb, var(--secondary-background-color) 70%, transparent); }
+  .pumps { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .pumps .chip { margin-left: 0; }
+  .levels { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+  .lvlh { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 2px; }
+  .journal { max-height: 280px; overflow: auto; }
+  .jrow { display: flex; justify-content: space-between; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--divider-color); }
+  .jrow:last-child { border-bottom: 0; }
+  .jtarget { font-size: .85rem; margin-left: 4px; }
+  .jdetail { margin-top: 3px; overflow-wrap: anywhere; }
 
   /* group tiles */
   .ggrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(215px, 1fr)); gap: 10px; }
