@@ -2261,6 +2261,8 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
       /** what to pause to skip this run: a group, or a single zone (own schedule) */
       kind: 'group' | 'zone';
       targetId: string;
+      /** schedule that produced this occurrence (for Lovelace card editing) */
+      scheduleId: string | null;
       /** current pause end of that target, ms epoch, or null */
       snoozeUntil: number | null;
       ts: number;
@@ -2296,6 +2298,7 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
           groupName: group.name,
           kind: 'group',
           targetId: group.id,
+          scheduleId: occ.scheduleId ?? schedule?.id ?? null,
           snoozeUntil: group.snoozeUntil ? Number(group.snoozeUntil) : null,
           ts: occ.ts,
           durationMin: this.groupRunMinutes(group, zones.map((z) => z.minutes)),
@@ -2321,6 +2324,7 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
           groupName: containing?.name ?? zone.name,
           kind: 'zone',
           targetId: zone.id,
+          scheduleId: occ.scheduleId ?? schedule?.id ?? null,
           snoozeUntil: zone.snoozeUntil ? Number(zone.snoozeUntil) : null,
           ts: occ.ts,
           durationMin: minutes,
@@ -2688,6 +2692,41 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
 
   clearFault(zoneId: string) {
     this.faultZones.delete(zoneId);
+    this.broadcastState();
+  }
+
+  /**
+   * Replace one schedule on a group or zone (Lovelace card / API helpers).
+   * `schedule.id` must match an existing schedule.
+   */
+  async updateSchedule(kind: 'group' | 'zone', targetId: string, schedule: Schedule) {
+    if (!schedule?.id) throw new Error('schedule.id required');
+    if (kind === 'group') {
+      const g = await this.groupsRepo.findOneBy({ id: targetId });
+      if (!g) throw new Error('group not found');
+      const schedules = [...(g.schedules ?? [])];
+      const i = schedules.findIndex((s) => s.id === schedule.id);
+      if (i < 0) throw new Error('schedule not found on group');
+      schedules[i] = schedule;
+      g.schedules = schedules;
+      await this.groupsRepo.save(g);
+    } else {
+      const z = await this.zonesRepo.findOneBy({ id: targetId });
+      if (!z) throw new Error('zone not found');
+      const schedules = [...(z.schedules ?? [])];
+      const i = schedules.findIndex((s) => s.id === schedule.id);
+      if (i < 0) throw new Error('schedule not found on zone');
+      schedules[i] = schedule;
+      z.schedules = schedules;
+      await this.zonesRepo.save(z);
+    }
+    await this.reloadConfig();
+    await this.journal.add('info', {
+      groupId: kind === 'group' ? targetId : undefined,
+      zoneId: kind === 'zone' ? targetId : undefined,
+      code: 'schedule_updated',
+      detail: `schedule ${schedule.id} updated via card/API`,
+    });
     this.broadcastState();
   }
 

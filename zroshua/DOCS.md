@@ -232,11 +232,14 @@ A custom card (`custom:zroshua-card`) with five views — `dashboard`, `groups`,
 `upcoming`, `timeline`. The **dashboard** view mirrors the add-on Overview: info tiles
 (watering / zones / groups / today water & time / next), Now + queue (+5 min / stop),
 upcoming with skip/pause, weather, quick actions, pumps & barrel levels, manual queue,
-and a live journal. With the Mosquitto add-on installed the add-on deploys the card to
-`/config/www` and registers the Lovelace resource automatically (YAML-mode dashboards:
-add `/local/zroshua-card.js` as a module resource yourself). Add it to a view with
-`type: custom:zroshua-card` (default `view: dashboard`). The card reads
-`sensor.zroshua_state` and sends commands via `mqtt.publish` on `zroshua/command`.
+and a live journal. **Tiles** — gear on the card (or the Lovelace card editor) shows /
+hides tiles; drag tiles to reorder. **Upcoming** — tap a row to edit that schedule
+(days, start times, zone selection & minutes), same backing data as the add-on editors.
+With the Mosquitto add-on installed the add-on deploys the card to `/config/www` and
+registers the Lovelace resource automatically (YAML-mode dashboards: add
+`/local/zroshua-card.js` as a module resource yourself). Add it with
+`type: custom:zroshua-card` (default `view: dashboard`). State from
+`sensor.zroshua_state`; commands via `mqtt.publish` on `zroshua/command`.
 
 ## MQTT discovery (native HA entities)
 

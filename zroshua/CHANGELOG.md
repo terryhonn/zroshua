@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.15
+
+- **Lovelace card: configurable tiles + schedule editing.** Gear / card editor
+  chooses which dashboard tiles show; drag tiles to reorder (saved in the
+  browser and card config). Tap an upcoming watering to edit that schedule —
+  enable/disable, days, start times, zone selection and per-zone minutes —
+  saved via MQTT `update_schedule` (same data as the add-on group/zone editors
+  for week-mode schedules).
+
 ## 0.4.14
 
 - **Lovelace dashboard card** mirrors the add-on Overview: six info tiles,

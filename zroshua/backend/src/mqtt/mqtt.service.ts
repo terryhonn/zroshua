@@ -355,19 +355,65 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
     const queueZoneIds = new Set(snapshot.queue.map((q: any) => q.zoneId));
     const runningGroupIds = new Set([...snapshot.active, ...snapshot.queue].map((a: any) => a.groupId).filter(Boolean));
 
-    const upcoming = (await this.engine.upcoming(7)).slice(0, 12).map((u: any) => ({
-      groupId: u.groupId,
-      groupName: u.groupName,
-      kind: u.kind ?? 'group',
-      targetId: u.targetId ?? u.groupId,
-      paused: u.snoozeUntil != null && u.snoozeUntil > Date.now(),
-      ts: u.ts,
-      minutes: Math.round(u.durationMin ?? u.zones.reduce((a: number, z: any) => a + z.minutes, 0)),
-      zones: u.zones.map((z: any) => z.name),
-      willSkip: u.willSkip ?? false,
-      skipReason: u.skipReasons?.[0] ?? null,
-      maybeSkip: u.maybeSkip?.[0] ?? null,
-    }));
+    const upcoming = (await this.engine.upcoming(7)).slice(0, 12).map((u: any) => {
+      const kind = (u.kind ?? 'group') as 'group' | 'zone';
+      const targetId = u.targetId ?? u.groupId;
+      const host =
+        kind === 'zone'
+          ? zones.find((z) => z.id === targetId)
+          : groups.find((g) => g.id === targetId);
+      const schedule =
+        (host as any)?.schedules?.find((s: any) => s.id === u.scheduleId) ??
+        null;
+      const memberZones =
+        kind === 'zone'
+          ? zones.filter((z) => z.id === targetId).map((z) => ({
+              id: z.id,
+              name: z.name,
+              baseMin: z.baseDurationMin,
+              maxMin: z.maxRuntimeMin,
+            }))
+          : ((host as any)?.zoneIds ?? [])
+              .map((id: string) => zones.find((z) => z.id === id))
+              .filter(Boolean)
+              .map((z: any) => ({
+                id: z.id,
+                name: z.name,
+                baseMin: z.baseDurationMin,
+                maxMin: z.maxRuntimeMin,
+              }));
+      return {
+        groupId: u.groupId,
+        groupName: u.groupName,
+        kind,
+        targetId,
+        scheduleId: u.scheduleId ?? null,
+        schedule: schedule
+          ? {
+              id: schedule.id,
+              mode: schedule.mode,
+              weekdays: schedule.weekdays ?? [],
+              starts: schedule.starts ?? [],
+              perDay: schedule.perDay ?? {},
+              season: schedule.season ?? null,
+              zoneDurations: schedule.zoneDurations ?? {},
+              zoneSelection: schedule.zoneSelection ?? null,
+              enabled: schedule.enabled !== false,
+            }
+          : null,
+        groupMode: kind === 'group' ? (host as any)?.mode ?? 'sequential' : 'sequential',
+        multiplierPct: kind === 'group' ? (host as any)?.multiplierPct ?? 100 : 100,
+        paused: u.snoozeUntil != null && u.snoozeUntil > Date.now(),
+        ts: u.ts,
+        minutes: Math.round(u.durationMin ?? u.zones.reduce((a: number, z: any) => a + z.minutes, 0)),
+        zones: u.zones.map((z: any) => z.name),
+        zoneDetails: u.zones,
+        memberZones,
+        willSkip: u.willSkip ?? false,
+        skipReason: u.skipReasons?.[0] ?? null,
+        maybeSkip: u.maybeSkip?.[0] ?? null,
+      };
+    });
 
     // 2-day timeline for the card (compact) + per-run finish windows
     const plan = await this.engine.plan(2).catch(() => ({ segments: [] as any[], envelopes: [] as any[] }));
@@ -559,6 +605,8 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
         return void (await this.engine.removeManualQueueItem(cmd.key));
       case 'manual_queue_clear':
         return void (await this.engine.clearManualQueue());
+      case 'update_schedule':
+        return void (await this.engine.updateSchedule(cmd.kind === 'zone' ? 'zone' : 'group', cmd.targetId, cmd.schedule));
       default:
         this.log.warn(`unknown command action: ${cmd?.action}`);
     }

@@ -14,6 +14,18 @@
  */
 const VIEWS = ['dashboard', 'groups', 'zones', 'upcoming', 'timeline'];
 
+/** Dashboard info tiles — order/visibility configurable (card config + drag). */
+const DASH_TILES = [
+  { id: 'watering_now', label: 'Watering now' },
+  { id: 'zones', label: 'Zones' },
+  { id: 'groups', label: 'Groups' },
+  { id: 'today_water', label: 'Today water' },
+  { id: 'today_time', label: 'Today time' },
+  { id: 'next_watering', label: 'Next watering' },
+];
+const DASH_TILE_IDS = DASH_TILES.map((t) => t.id);
+const TILE_STORE_KEY = 'zroshua.card.tiles';
+
 const I = {
   play: '<svg viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z"/></svg>',
   stop: '<svg viewBox="0 0 24 24"><rect x="6.5" y="6.5" width="11" height="11" rx="2"/></svg>',
@@ -37,6 +49,7 @@ const I = {
   plant: '<svg viewBox="0 0 24 24"><path d="M12 21v-8M12 13c0-4-3-6-7-6 0 4 3 6 7 6zm0 0c0-4 3-6 7-6 0 4-3 6-7 6z"/></svg>',
   group: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>',
   bucket: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 8h12l-1.2 11.2a2 2 0 0 1-2 1.8H9.2a2 2 0 0 1-2-1.8L6 8zm-1-3h14"/></svg>',
+  gear: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2.5M12 20.5V23M4.2 4.2l1.8 1.8M18 18l1.8 1.8M1 12h2.5M20.5 12H23M4.2 19.8l1.8-1.8M18 6l1.8-1.8" stroke-linecap="round"/></svg>',
 };
 const zoneIcon = (type) =>
   type === 'drip' ? I.drop : type === 'beds' ? I.sprout : I.sprinkler;
@@ -48,6 +61,10 @@ class ZroshuaCard extends HTMLElement {
     this._built = false;
     this._sel = null;
     this._filter = 'all';
+    this._tileCfg = false;
+    this._editUp = null; // upcoming row being edited
+    this._editDraft = null; // schedule draft
+    this._dragTile = null;
   }
 
   set hass(hass) {
@@ -57,6 +74,19 @@ class ZroshuaCard extends HTMLElement {
     const st = this._state();
     if (st === this._lastState && this._built) return;
     this._lastState = st;
+    // Keep an open schedule editor draft across hub refreshes.
+    if (this._editUp && this._editDraft && st?.attributes) {
+      const still = (st.attributes.upcoming || []).find(
+        (u) => u.scheduleId === this._editUp.scheduleId && u.targetId === this._editUp.targetId && u.ts === this._editUp.ts,
+      );
+      if (!still) {
+        // Match by schedule+target if ts drifted after save.
+        const alt = (st.attributes.upcoming || []).find(
+          (u) => u.scheduleId === this._editDraft.id && u.targetId === this._editUp.targetId,
+        );
+        if (alt) this._editUp = alt;
+      }
+    }
     this._render();
   }
 
@@ -98,6 +128,67 @@ class ZroshuaCard extends HTMLElement {
       topic: 'zroshua/command',
       payload: JSON.stringify({ action, ...extra }),
     });
+  }
+
+  /** Visible tile ids in display order. */
+  _tileLayout() {
+    const prefs = this._tilePrefs();
+    const hidden = new Set(prefs.hidden || []);
+    return (prefs.order || [...DASH_TILE_IDS]).filter((id) => DASH_TILE_IDS.includes(id) && !hidden.has(id));
+  }
+
+  _tilePrefs() {
+    try {
+      const raw = localStorage.getItem(TILE_STORE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed?.order)) {
+          const order = parsed.order.filter((id) => DASH_TILE_IDS.includes(id));
+          for (const id of DASH_TILE_IDS) if (!order.includes(id)) order.push(id);
+          return { order, hidden: (parsed.hidden || []).filter((id) => DASH_TILE_IDS.includes(id)) };
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+    if (Array.isArray(this._config.tiles)) {
+      const visible = this._config.tiles.filter((id) => DASH_TILE_IDS.includes(id));
+      const hidden = DASH_TILE_IDS.filter((id) => !visible.includes(id));
+      const order = [...visible, ...hidden];
+      return { order, hidden };
+    }
+    return { order: [...DASH_TILE_IDS], hidden: [...(this._config.hiddenTiles || [])] };
+  }
+
+  _saveTilePrefs(prefs) {
+    const order = (prefs.order || []).filter((id) => DASH_TILE_IDS.includes(id));
+    for (const id of DASH_TILE_IDS) if (!order.includes(id)) order.push(id);
+    const hidden = (prefs.hidden || []).filter((id) => DASH_TILE_IDS.includes(id));
+    const next = { order, hidden };
+    try {
+      localStorage.setItem(TILE_STORE_KEY, JSON.stringify(next));
+    } catch {
+      /* private mode */
+    }
+    // Persist into Lovelace card config when the dashboard can accept it.
+    const visible = order.filter((id) => !hidden.includes(id));
+    this._config = { ...this._config, tiles: visible, hiddenTiles: hidden };
+    this.dispatchEvent(
+      new CustomEvent('config-changed', { detail: { config: this._config }, bubbles: true, composed: true }),
+    );
+  }
+
+  _reorderTile(fromId, toId) {
+    if (!fromId || !toId || fromId === toId) return;
+    const prefs = this._tilePrefs();
+    const order = [...prefs.order];
+    const fi = order.indexOf(fromId);
+    const ti = order.indexOf(toId);
+    if (fi < 0 || ti < 0) return;
+    order.splice(fi, 1);
+    order.splice(ti, 0, fromId);
+    this._saveTilePrefs({ ...prefs, order });
+    this._render();
   }
   _fmtTime(ts) {
     return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -233,6 +324,154 @@ class ZroshuaCard extends HTMLElement {
       this._filter = el.dataset.filter;
       this._render();
     });
+    on('[data-tile-cfg]', () => {
+      this._tileCfg = true;
+      this._openAnim = true;
+      this._render();
+    });
+    on('[data-close-tile-cfg]', () => {
+      this._tileCfg = false;
+      this._render();
+    });
+    on('[data-tile-toggle]', (el) => {
+      const id = el.dataset.tileToggle;
+      const prefs = this._tilePrefs();
+      const hidden = new Set(prefs.hidden || []);
+      if (el.checked) hidden.delete(id);
+      else hidden.add(id);
+      // Keep at least one tile visible.
+      const visible = DASH_TILE_IDS.filter((t) => !hidden.has(t));
+      if (!visible.length) return;
+      this._saveTilePrefs({ order: prefs.order, hidden: [...hidden] });
+      this._render();
+    });
+    on('[data-tile-reset]', () => {
+      this._saveTilePrefs({ order: [...DASH_TILE_IDS], hidden: [] });
+      this._render();
+    });
+    on('[data-edit-up]', (el) => {
+      const i = Number(el.dataset.editUp);
+      const u = (a.upcoming || []).filter((x) => x.ts > Date.now())[i];
+      if (!u?.schedule) return;
+      this._editUp = u;
+      this._editDraft = JSON.parse(JSON.stringify(u.schedule));
+      this._openAnim = true;
+      this._sel = null;
+      this._tileCfg = false;
+      this._render();
+    });
+    on('[data-close-edit]', () => {
+      this._editUp = null;
+      this._editDraft = null;
+      this._render();
+    });
+    on('[data-save-schedule]', () => {
+      if (!this._editUp || !this._editDraft) return;
+      this._cmd('update_schedule', {
+        kind: this._editUp.kind === 'zone' ? 'zone' : 'group',
+        targetId: this._editUp.targetId,
+        schedule: this._editDraft,
+      });
+      this._editUp = null;
+      this._editDraft = null;
+      this._render();
+    });
+    // Schedule draft field edits (keep sheet open).
+    card.querySelectorAll('[data-sch-field]').forEach((el) => {
+      const apply = () => {
+        if (!this._editDraft) return;
+        const field = el.dataset.schField;
+        if (field === 'enabled') this._editDraft.enabled = el.checked;
+        else if (field === 'weekday') {
+          const d = Number(el.dataset.day);
+          const set = new Set(this._editDraft.weekdays || []);
+          if (el.checked) set.add(d);
+          else set.delete(d);
+          this._editDraft.weekdays = [...set].sort((a, b) => a - b);
+        } else if (field === 'start') {
+          const i = Number(el.dataset.idx);
+          const starts = [...(this._editDraft.starts || [])];
+          if (!starts[i]) starts[i] = { start: '06:00' };
+          starts[i] = { ...starts[i], start: el.value };
+          this._editDraft.starts = starts;
+        } else if (field === 'anchor') {
+          const i = Number(el.dataset.idx);
+          const starts = [...(this._editDraft.starts || [])];
+          if (!starts[i]) starts[i] = { start: '06:00' };
+          starts[i] = { ...starts[i], anchor: el.value === 'finish' ? 'finish' : 'start' };
+          this._editDraft.starts = starts;
+        } else if (field === 'zoneDur') {
+          const zid = el.dataset.zid;
+          this._editDraft.zoneDurations = { ...(this._editDraft.zoneDurations || {}), [zid]: Number(el.value) || 0 };
+        } else if (field === 'zoneSel') {
+          const zid = el.dataset.zid;
+          let sel = this._editDraft.zoneSelection ? [...this._editDraft.zoneSelection] : null;
+          // null = all zones; first untick creates explicit list of all except this one
+          const allIds = (this._editUp.memberZones || []).map((z) => z.id);
+          if (sel == null) sel = el.checked ? null : allIds.filter((id) => id !== zid);
+          else {
+            if (el.checked && !sel.includes(zid)) sel.push(zid);
+            if (!el.checked) sel = sel.filter((id) => id !== zid);
+            if (sel.length === allIds.length) sel = null;
+          }
+          this._editDraft.zoneSelection = sel;
+        }
+      };
+      el.onchange = (e) => {
+        e.stopPropagation();
+        apply();
+        if (el.dataset.schField === 'zoneSel' || el.dataset.schField === 'weekday' || el.dataset.schField === 'enabled') {
+          this._render();
+        }
+      };
+      if (el.tagName === 'INPUT' && el.type === 'number') {
+        el.oninput = (e) => {
+          e.stopPropagation();
+          apply();
+        };
+      }
+    });
+    on('[data-add-start]', () => {
+      if (!this._editDraft) return;
+      this._editDraft.starts = [...(this._editDraft.starts || []), { start: '18:00', anchor: 'start' }];
+      this._render();
+    });
+    on('[data-del-start]', (el) => {
+      if (!this._editDraft) return;
+      const i = Number(el.dataset.delStart);
+      this._editDraft.starts = (this._editDraft.starts || []).filter((_, idx) => idx !== i);
+      if (!this._editDraft.starts.length) this._editDraft.starts = [{ start: '06:00', anchor: 'start' }];
+      this._render();
+    });
+
+    // Tile drag-and-drop
+    card.querySelectorAll('[data-tile-id]').forEach((el) => {
+      el.ondragstart = (e) => {
+        this._dragTile = el.dataset.tileId;
+        this._didTileDrag = false;
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', el.dataset.tileId);
+        el.classList.add('dragging');
+      };
+      el.ondragend = () => {
+        el.classList.remove('dragging');
+        this._dragTile = null;
+        card.querySelectorAll('.tile.drag-over').forEach((x) => x.classList.remove('drag-over'));
+      };
+      el.ondragover = (e) => {
+        e.preventDefault();
+        this._didTileDrag = true;
+        e.dataTransfer.dropEffect = 'move';
+        el.classList.add('drag-over');
+      };
+      el.ondragleave = () => el.classList.remove('drag-over');
+      el.ondrop = (e) => {
+        e.preventDefault();
+        el.classList.remove('drag-over');
+        const from = e.dataTransfer.getData('text/plain') || this._dragTile;
+        this._reorderTile(from, el.dataset.tileId);
+      };
+    });
   }
 
   _chip(txt, cls = '', icon = '') {
@@ -251,10 +490,39 @@ class ZroshuaCard extends HTMLElement {
     const nextList = (a.upcoming || []).filter((u) => u.ts > Date.now()).slice(0, 6);
     const next = nextList[0];
 
-    const tile = (label, value, sub, icon, cls = '') =>
-      `<div class="tile"><span class="ti ${cls}">${icon}</span><div class="grow"><span class="muted small">${label}</span><b>${value}</b>${
-        sub ? `<div class="muted tiny">${sub}</div>` : ''
-      }</div></div>`;
+    const tileData = {
+      watering_now: {
+        label: 'Watering now',
+        value: String((a.active || []).length),
+        sub: (a.queue || []).length ? `${a.queue.length} queued` : '',
+        icon: I.drop,
+        cls: 'ok',
+      },
+      zones: { label: 'Zones', value: `${enabledZones}/${zones.length}`, sub: 'enabled / total', icon: I.plant, cls: 'ok' },
+      groups: { label: 'Groups', value: String(groups.length), sub: `${enabledGroups} enabled`, icon: I.group, cls: 'accent' },
+      today_water: { label: 'Today water', value: `${a.litersToday ?? 0} ${vol}`, sub: '', icon: I.bucket, cls: 'idle' },
+      today_time: { label: 'Today time', value: this._fmtMin(a.minutesToday ?? 0), sub: 'completed runs', icon: I.clock, cls: 'warn' },
+      next_watering: {
+        label: 'Next watering',
+        value: next ? this._countdown(next.ts) : '—',
+        sub: next ? `${this._fmtTime(next.ts)} · ${this._esc(next.groupName)}` : '',
+        icon: I.clock,
+        cls: 'accent',
+      },
+    };
+
+    const tilesHtml = this._tileLayout()
+      .map((id) => {
+        const t = tileData[id];
+        if (!t) return '';
+        return `<div class="tile" draggable="true" data-tile-id="${id}" title="Drag to reorder">
+          <span class="ti ${t.cls}">${t.icon}</span>
+          <div class="grow"><span class="muted small">${t.label}</span><b>${t.value}</b>${
+            t.sub ? `<div class="muted tiny">${t.sub}</div>` : ''
+          }</div>
+        </div>`;
+      })
+      .join('');
 
     const active = (a.active || [])
       .map((r) => {
@@ -279,7 +547,7 @@ class ZroshuaCard extends HTMLElement {
       .join('');
 
     const upcoming = nextList
-      .map((u) => {
+      .map((u, i) => {
         const dim = u.willSkip || u.paused ? 'dim' : '';
         const kindAttr = u.kind === 'zone' ? 'data-pause-zone' : 'data-pause-group';
         const target = u.kind === 'zone' ? u.targetId : u.groupId;
@@ -300,7 +568,10 @@ class ZroshuaCard extends HTMLElement {
               ? this._chip(`may skip: ${u.maybeSkip}`, 'warn')
               : '';
         const zonesTxt = (u.zones || []).join(', ');
-        return `<div class="uprow ${dim}">
+        const editable = !!u.schedule;
+        return `<div class="uprow ${dim} ${editable ? 'tap' : ''}" ${editable ? `data-edit-up="${i}"` : ''} title="${
+          editable ? 'Edit schedule' : ''
+        }">
           <div class="uptop">
             <div class="grow">
               <div class="upname"><b>${this._esc(u.groupName)}</b>${u.kind === 'zone' ? ' <span class="ztag">zone</span>' : ''}</div>
@@ -378,14 +649,11 @@ class ZroshuaCard extends HTMLElement {
 
     return `
       <div class="pad dash">
-        <div class="tiles tiles6">
-          ${tile('Watering now', String((a.active || []).length), (a.queue || []).length ? `${a.queue.length} queued` : '', I.drop, 'ok')}
-          ${tile('Zones', `${enabledZones}/${zones.length}`, 'enabled / total', I.plant, 'ok')}
-          ${tile('Groups', String(groups.length), `${enabledGroups} enabled`, I.group, 'accent')}
-          ${tile('Today water', `${a.litersToday ?? 0} ${vol}`, '', I.bucket, 'idle')}
-          ${tile('Today time', this._fmtMin(a.minutesToday ?? 0), 'completed runs', I.clock, 'warn')}
-          ${tile('Next watering', next ? this._countdown(next.ts) : '—', next ? `${this._fmtTime(next.ts)} · ${this._esc(next.groupName)}` : '', I.clock, 'accent')}
+        <div class="dash-tools">
+          <span class="muted tiny">Drag tiles to reorder</span>
+          ${this._btn({ cls: 'ghost icon', data: 'data-tile-cfg', icon: I.gear, title: 'Choose tiles' })}
         </div>
+        <div class="tiles tiles6">${tilesHtml || '<div class="muted">No tiles selected — open tile settings.</div>'}</div>
 
         <div class="panel">
           <div class="sec top">Now</div>
@@ -395,6 +663,7 @@ class ZroshuaCard extends HTMLElement {
 
         <div class="panel">
           <div class="sec top">Upcoming waterings</div>
+          <div class="muted tiny" style="margin-bottom:6px">Tap a row to edit schedule &amp; zone timings</div>
           ${upcoming || '<div class="muted">No scheduled waterings in the next 7 days.</div>'}
         </div>
 
@@ -432,7 +701,114 @@ class ZroshuaCard extends HTMLElement {
         </div>
 
         ${this._sheet(a)}
+        ${this._tileCfgSheet()}
+        ${this._scheduleSheet()}
       </div>`;
+  }
+
+  _tileCfgSheet() {
+    if (!this._tileCfg) return '';
+    const prefs = this._tilePrefs();
+    const hidden = new Set(prefs.hidden || []);
+    const anim = this._openAnim ? ' anim' : '';
+    this._openAnim = false;
+    const rows = DASH_TILES.map(
+      (t) => `<label class="tcfg-row">
+        <input type="checkbox" data-tile-toggle="${t.id}" ${hidden.has(t.id) ? '' : 'checked'} />
+        <span>${this._esc(t.label)}</span>
+      </label>`,
+    ).join('');
+    return `<div class="ovl" data-close-tile-cfg></div><div class="sheet sheet-wide${anim}">
+      <div class="shead">
+        <div class="grow"><b>Dashboard tiles</b><div class="muted small">Show / hide tiles. Drag tiles on the card to reorder.</div></div>
+        ${this._btn({ cls: 'ghost icon', data: 'data-close-tile-cfg', icon: I.x, title: 'Close' })}
+      </div>
+      <div class="tcfg">${rows}</div>
+      <div class="srow" style="margin-top:10px">
+        ${this._btn({ cls: 'ghost', data: 'data-tile-reset', label: 'Reset defaults' })}
+        ${this._btn({ cls: 'primary', data: 'data-close-tile-cfg', label: 'Done' })}
+      </div>
+    </div>`;
+  }
+
+  _scheduleSheet() {
+    const u = this._editUp;
+    const s = this._editDraft;
+    if (!u || !s) return '';
+    const anim = this._openAnim ? ' anim' : '';
+    this._openAnim = false;
+    const days = [
+      [1, 'Mon'],
+      [2, 'Tue'],
+      [3, 'Wed'],
+      [4, 'Thu'],
+      [5, 'Fri'],
+      [6, 'Sat'],
+      [0, 'Sun'],
+    ];
+    const wd = new Set(s.weekdays || []);
+    const dayChips = days
+      .map(
+        ([d, label]) =>
+          `<label class="daychip"><input type="checkbox" data-sch-field="weekday" data-day="${d}" ${
+            wd.has(d) ? 'checked' : ''
+          }/><span>${label}</span></label>`,
+      )
+      .join('');
+    const starts = (s.starts || [{ start: '06:00' }])
+      .map(
+        (st, i) => `<div class="sch-start">
+        <input type="time" data-sch-field="start" data-idx="${i}" value="${this._esc(st.start || '06:00')}" />
+        <select data-sch-field="anchor" data-idx="${i}">
+          <option value="start" ${st.anchor !== 'finish' ? 'selected' : ''}>Start at</option>
+          <option value="finish" ${st.anchor === 'finish' ? 'selected' : ''}>Finish by</option>
+        </select>
+        ${this._btn({ cls: 'ghost icon', data: `data-del-start="${i}"`, icon: I.x, title: 'Remove' })}
+      </div>`,
+      )
+      .join('');
+    const members = u.memberZones || [];
+    const sel = s.zoneSelection;
+    const zoneRows = members
+      .map((z) => {
+        const included = !sel || sel.includes(z.id);
+        const dur = s.zoneDurations?.[z.id] ?? z.baseMin;
+        return `<div class="sch-zone">
+          <label class="sch-zone-on"><input type="checkbox" data-sch-field="zoneSel" data-zid="${this._esc(z.id)}" ${
+            included ? 'checked' : ''
+          }/> <b>${this._esc(z.name)}</b></label>
+          <label class="sch-dur">min <input type="number" min="1" max="${z.maxMin || 999}" step="1"
+            data-sch-field="zoneDur" data-zid="${this._esc(z.id)}" value="${Math.round(dur)}" ${included ? '' : 'disabled'}/></label>
+        </div>`;
+      })
+      .join('');
+    const modeNote =
+      s.mode === 'per_day'
+        ? `<div class="muted small" style="margin:6px 0">This schedule uses per-day times. Weekday chips &amp; starts below edit the shared week template; open the add-on for full per-day editing.</div>`
+        : '';
+    return `<div class="ovl" data-close-edit></div><div class="sheet sheet-wide${anim}">
+      <div class="shead">
+        <div class="grow">
+          <b>${this._esc(u.groupName)}</b>
+          <div class="muted small">${u.kind === 'zone' ? 'Zone schedule' : 'Group schedule'} · ${this._fmtTime(u.ts)} · ${this._countdown(u.ts)}</div>
+        </div>
+        ${this._btn({ cls: 'ghost icon', data: 'data-close-edit', icon: I.x, title: 'Close' })}
+      </div>
+      <label class="tcfg-row"><input type="checkbox" data-sch-field="enabled" ${s.enabled !== false ? 'checked' : ''}/> <span>Schedule enabled</span></label>
+      ${modeNote}
+      <div class="sec">Days</div>
+      <div class="dayrow">${dayChips}</div>
+      <div class="sec">Start times</div>
+      ${starts}
+      <div class="srow" style="margin-top:6px">${this._btn({ cls: 'ghost', data: 'data-add-start', icon: I.plus, label: 'Add time' })}</div>
+      <div class="sec">Zones &amp; durations</div>
+      <div class="muted tiny" style="margin-bottom:6px">Untick a zone to leave it out of this schedule. Duration is minutes for this schedule only.</div>
+      ${zoneRows || '<div class="muted">No zones</div>'}
+      <div class="srow" style="margin-top:12px">
+        ${this._btn({ cls: 'ghost', data: 'data-close-edit', label: 'Cancel' })}
+        ${this._btn({ cls: 'primary', data: 'data-save-schedule', label: 'Save schedule' })}
+      </div>
+    </div>`;
   }
 
   _view_groups(a) {
@@ -723,7 +1099,8 @@ const STYLE = `
   @container (min-width: 520px) { .tiles6 { grid-template-columns: repeat(3, 1fr); } }
   @container (min-width: 780px) { .tiles6 { grid-template-columns: repeat(6, 1fr); } }
   .tile { display: flex; align-items: center; gap: 10px; background: var(--secondary-background-color);
-    border-radius: 14px; padding: 10px 12px; min-width: 0; }
+    border-radius: 14px; padding: 10px 12px; min-width: 0; cursor: grab; user-select: none;
+    transition: box-shadow .12s, outline .12s; }
   .tile b { display: block; font-size: 1.05rem; line-height: 1.15; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .tile .tiny { margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .ti { width: 34px; height: 34px; border-radius: 10px; align-items: center; justify-content: center; flex-shrink: 0; }
@@ -737,6 +1114,30 @@ const STYLE = `
     background: color-mix(in srgb, var(--secondary-background-color) 35%, transparent); }
   .sec.top { margin-top: 0; }
   .rowish { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .dash-tools { display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .tile.dragging { opacity: .55; cursor: grabbing; }
+  .tile.drag-over { outline: 2px solid var(--z-info); outline-offset: 1px; }
+  .sheet-wide { width: min(520px, calc(100vw - 20px)); max-height: min(85vh, 720px); overflow: auto; }
+  .tcfg { display: flex; flex-direction: column; gap: 8px; }
+  .tcfg-row { display: flex; align-items: center; gap: 10px; padding: 8px 4px; cursor: pointer;
+    border-bottom: 1px solid var(--divider-color); font-weight: 600; }
+  .tcfg-row:last-child { border-bottom: 0; }
+  .tcfg-row input { width: 18px; height: 18px; accent-color: var(--z-ok); }
+  .dayrow { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+  .daychip { display: inline-flex; align-items: center; gap: 4px; padding: 5px 8px; border-radius: 999px;
+    border: 1px solid var(--divider-color); font-size: .8rem; font-weight: 600; cursor: pointer; }
+  .daychip input { accent-color: var(--z-ok); }
+  .sch-start { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; flex-wrap: wrap; }
+  .sch-start input[type=time], .sch-start select, .sch-dur input {
+    padding: 7px 8px; border-radius: 8px; border: 1px solid var(--divider-color);
+    background: var(--card-background-color); color: var(--primary-text-color); }
+  .sch-zone { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 0;
+    border-bottom: 1px solid var(--divider-color); flex-wrap: wrap; }
+  .sch-zone-on { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+  .sch-dur { display: flex; align-items: center; gap: 6px; font-size: .85rem; color: var(--secondary-text-color); }
+  .sch-dur input { width: 72px; }
+  .uprow.tap { cursor: pointer; border-radius: 10px; margin: 0 -6px; padding: 8px 6px; transition: background .12s; }
+  @media (hover: hover) { .uprow.tap:hover { background: color-mix(in srgb, var(--secondary-background-color) 55%, transparent); } }
   .tiny { font-size: .72rem; }
   .info { color: var(--z-info); }
   .wx { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
@@ -871,7 +1272,7 @@ const STYLE = `
   .tllegend { margin-top: 8px; }
 `;
 
-// simple config editor: a view selector + title
+// Config editor: view, title, dashboard tiles
 class ZroshuaCardEditor extends HTMLElement {
   setConfig(config) {
     this._config = { view: 'dashboard', ...config };
@@ -882,29 +1283,47 @@ class ZroshuaCardEditor extends HTMLElement {
   }
   _render() {
     if (!this.shadowRoot) this.attachShadow({ mode: 'open' });
+    const tiles = Array.isArray(this._config.tiles) ? this._config.tiles : [...DASH_TILE_IDS];
+    const hidden = new Set(DASH_TILE_IDS.filter((id) => !tiles.includes(id)));
+    const tileRows = DASH_TILES.map(
+      (t) =>
+        `<label class="t"><input type="checkbox" data-tile="${t.id}" ${hidden.has(t.id) ? '' : 'checked'}/> ${t.label}</label>`,
+    ).join('');
     this.shadowRoot.innerHTML = `
       <style>
         .f { display: flex; flex-direction: column; gap: 10px; padding: 8px 0; }
         label { font-size: .85rem; color: var(--secondary-text-color); }
-        select, input { padding: 8px; border-radius: 8px; border: 1px solid var(--divider-color);
+        select, input[type=text] { padding: 8px; border-radius: 8px; border: 1px solid var(--divider-color);
           background: var(--card-background-color); color: var(--primary-text-color); }
+        .tiles { display: flex; flex-direction: column; gap: 6px; padding: 4px 0; }
+        .t { display: flex; align-items: center; gap: 8px; color: var(--primary-text-color); font-weight: 600; cursor: pointer; }
+        .hint { font-size: .75rem; color: var(--secondary-text-color); }
       </style>
       <div class="f">
         <label>View</label>
         <select id="view">${VIEWS.map((v) => `<option value="${v}" ${v === this._config.view ? 'selected' : ''}>${v}</option>`).join('')}</select>
         <label>Title (optional)</label>
-        <input id="title" value="${this._config.title || ''}" />
+        <input id="title" type="text" value="${this._config.title || ''}" />
+        <label>Dashboard tiles</label>
+        <div class="hint">Uncheck to hide. On the card, drag tiles to reorder (saved in the browser; also written to card config when possible).</div>
+        <div class="tiles">${tileRows}</div>
       </div>`;
     const emit = () => {
+      const visible = [...this.shadowRoot.querySelectorAll('[data-tile]:checked')].map((el) => el.dataset.tile);
+      const order = Array.isArray(this._config.tiles)
+        ? [...this._config.tiles.filter((id) => visible.includes(id)), ...visible.filter((id) => !(this._config.tiles || []).includes(id))]
+        : visible;
       this._config = {
         ...this._config,
         view: this.shadowRoot.getElementById('view').value,
         title: this.shadowRoot.getElementById('title').value || undefined,
+        tiles: order.length ? order : [...DASH_TILE_IDS],
       };
       this.dispatchEvent(new CustomEvent('config-changed', { detail: { config: this._config }, bubbles: true, composed: true }));
     };
     this.shadowRoot.getElementById('view').onchange = emit;
     this.shadowRoot.getElementById('title').oninput = emit;
+    this.shadowRoot.querySelectorAll('[data-tile]').forEach((el) => (el.onchange = emit));
   }
 }
 
