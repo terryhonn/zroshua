@@ -1316,16 +1316,18 @@ const STYLE = `
   .zchip.running .zs .dot { animation: zpulse 1.4s ease-in-out infinite; }
   @keyframes zpulse { 0%,100% { opacity: 1; } 50% { opacity: .25; } }
 
-  /* Dialogs: centered overlay (schedule edit, add queue, zone sheet) */
-  .ovl { position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 6;
-    display: flex; align-items: center; justify-content: center; padding: 16px; box-sizing: border-box; }
-  .sheet { position: relative; left: auto; bottom: auto; transform: none;
+  /* Dialogs: centered on the viewport (schedule edit, add queue, zone sheet) */
+  .ovl { position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 6; }
+  .sheet { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
     width: min(430px, calc(100vw - 32px)); max-height: min(85vh, 720px); overflow: auto;
     box-sizing: border-box; z-index: 7; padding: 14px 16px 16px;
     background: var(--card-background-color); border: 1px solid var(--divider-color);
-    border-radius: 16px; box-shadow: 0 16px 48px rgba(0,0,0,.45); margin: auto; }
+    border-radius: 16px; box-shadow: 0 16px 48px rgba(0,0,0,.45); }
   .sheet.anim { animation: zpop .16s ease-out; }
-  @keyframes zpop { from { transform: scale(.96); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+  @keyframes zpop {
+    from { transform: translate(-50%, -50%) scale(.96); opacity: 0; }
+    to { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+  }
   .shead { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
   .shead .zs { display: flex; margin-top: 2px; }
   .srow { display: flex; gap: 7px; flex-wrap: wrap; }
