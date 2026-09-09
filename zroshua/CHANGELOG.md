@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.18
+
+- **Lovelace card dialogs centered** on screen (schedule edit, add-to-queue,
+  zone sheet) instead of pinned to the bottom edge.
+- **Hide Now when idle** card option: when enabled, the Now & queue section is
+  omitted unless something is watering or queued.
+
 ## 0.4.17
 
 - **Lovelace card: Add zone to manual queue.** The Manual queue section always

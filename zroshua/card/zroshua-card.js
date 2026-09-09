@@ -165,6 +165,10 @@ class ZroshuaCard extends HTMLElement {
             },
           },
         },
+        {
+          name: 'hide_now_when_idle',
+          selector: { boolean: {} },
+        },
       ],
       computeLabel: (schema) =>
         ({
@@ -173,6 +177,7 @@ class ZroshuaCard extends HTMLElement {
           view: 'View',
           sections: 'Dashboard sections',
           tiles: 'Info tiles',
+          hide_now_when_idle: 'Hide Now when idle',
         })[schema.name],
       computeHelper: (schema) => {
         switch (schema.name) {
@@ -184,6 +189,8 @@ class ZroshuaCard extends HTMLElement {
             return 'Tiles inside the Info tiles section. Drag to reorder; uncheck to hide. Only used when Info tiles is enabled above.';
           case 'view':
             return 'dashboard is the Overview-style card; other views are specialized.';
+          case 'hide_now_when_idle':
+            return 'When enabled, the Now & queue section is omitted unless something is watering or queued.';
           default:
             return undefined;
         }
@@ -197,6 +204,7 @@ class ZroshuaCard extends HTMLElement {
       entity: 'sensor.zroshua_state',
       sections: [...DASH_SECTION_IDS],
       tiles: [...DASH_TILE_IDS],
+      hide_now_when_idle: false,
     };
   }
 
@@ -751,7 +759,9 @@ class ZroshuaCard extends HTMLElement {
         </div>`,
     };
 
+    const idleNow = !(a.active || []).length && !(a.queue || []).length;
     const body = this._sectionLayout()
+      .filter((id) => !(id === 'now' && this._config.hide_now_when_idle && idleNow))
       .map((id) => blocks[id] || '')
       .join('');
 
@@ -1201,7 +1211,7 @@ const STYLE = `
     background: color-mix(in srgb, var(--secondary-background-color) 35%, transparent); }
   .sec.top { margin-top: 0; }
   .rowish { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-  .sheet-wide { width: min(520px, calc(100vw - 20px)); max-height: min(85vh, 720px); overflow: auto; }
+  .sheet-wide { width: min(520px, calc(100vw - 32px)); }
   .mq-actions { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; }
   .mq-select { width: 100%; margin: 4px 0 8px; padding: 9px 10px; border-radius: 10px;
     border: 1px solid var(--divider-color); background: var(--card-background-color); color: var(--primary-text-color);
@@ -1306,15 +1316,16 @@ const STYLE = `
   .zchip.running .zs .dot { animation: zpulse 1.4s ease-in-out infinite; }
   @keyframes zpulse { 0%,100% { opacity: 1; } 50% { opacity: .25; } }
 
-  /* zone action sheet: fixed overlay over the viewport (no scroll, no layout shift) */
-  .ovl { position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 6; }
-  .sheet { position: fixed; left: 50%; transform: translateX(-50%);
-    bottom: calc(14px + env(safe-area-inset-bottom, 0px));
-    width: min(430px, calc(100vw - 20px)); box-sizing: border-box; z-index: 7; padding: 12px;
+  /* Dialogs: centered overlay (schedule edit, add queue, zone sheet) */
+  .ovl { position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 6;
+    display: flex; align-items: center; justify-content: center; padding: 16px; box-sizing: border-box; }
+  .sheet { position: relative; left: auto; bottom: auto; transform: none;
+    width: min(430px, calc(100vw - 32px)); max-height: min(85vh, 720px); overflow: auto;
+    box-sizing: border-box; z-index: 7; padding: 14px 16px 16px;
     background: var(--card-background-color); border: 1px solid var(--divider-color);
-    border-radius: 16px; box-shadow: 0 12px 40px rgba(0,0,0,.5); }
-  .sheet.anim { animation: zup .18s ease-out; }
-  @keyframes zup { from { transform: translate(-50%, 16px); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
+    border-radius: 16px; box-shadow: 0 16px 48px rgba(0,0,0,.45); margin: auto; }
+  .sheet.anim { animation: zpop .16s ease-out; }
+  @keyframes zpop { from { transform: scale(.96); opacity: 0; } to { transform: scale(1); opacity: 1; } }
   .shead { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
   .shead .zs { display: flex; margin-top: 2px; }
   .srow { display: flex; gap: 7px; flex-wrap: wrap; }
