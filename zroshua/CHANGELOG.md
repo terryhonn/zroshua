@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.17
+
+- **Lovelace card: Add zone to manual queue.** The Manual queue section always
+  has an **Add zone** button (even when empty). Pick zone + duration (presets
+  or custom minutes); starts immediately or joins the sequential queue. Empty
+  state copy and running-head display match the add-on dashboard.
+
 ## 0.4.16
 
 - **Lovelace Visual editor for the dashboard card.** Edit the card in Lovelace

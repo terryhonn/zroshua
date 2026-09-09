@@ -89,6 +89,9 @@ class ZroshuaCard extends HTMLElement {
     this._filter = 'all';
     this._editUp = null; // upcoming row being edited
     this._editDraft = null; // schedule draft
+    this._addMq = false; // add-to-manual-queue sheet
+    this._mqZoneId = null;
+    this._mqMinutes = 15;
   }
 
   set hass(hass) {
@@ -350,6 +353,48 @@ class ZroshuaCard extends HTMLElement {
     on('[data-extend-zone]', (el) => this._cmd('extend_zone', { zoneId: el.dataset.extendZone, minutes: Number(el.dataset.min) || 5 }));
     on('[data-mq-remove]', (el) => this._cmd('manual_queue_remove', { key: el.dataset.mqRemove }));
     on('[data-mq-clear]', () => this._cmd('manual_queue_clear'));
+    on('[data-mq-add]', () => {
+      const enabled = (a.zones || []).filter((z) => z.enabled);
+      const first = enabled[0];
+      this._mqZoneId = first?.id ?? null;
+      this._mqMinutes = Math.round(first?.baseMin ?? 15);
+      this._addMq = true;
+      this._openAnim = true;
+      this._render();
+    });
+    on('[data-close-mq]', () => {
+      this._addMq = false;
+      this._render();
+    });
+    on('[data-mq-submit]', () => {
+      if (!this._mqZoneId) return;
+      this._cmd('run_zone', { zoneId: this._mqZoneId, minutes: Number(this._mqMinutes) || undefined });
+      this._addMq = false;
+      this._render();
+    });
+    card.querySelectorAll('[data-mq-zone]').forEach((el) => {
+      el.onchange = (e) => {
+        e.stopPropagation();
+        this._mqZoneId = el.value || null;
+        const z = (a.zones || []).find((x) => x.id === this._mqZoneId);
+        if (z) this._mqMinutes = Math.round(z.baseMin || 15);
+        this._render();
+      };
+    });
+    card.querySelectorAll('[data-mq-min]').forEach((el) => {
+      el.oninput = (e) => {
+        e.stopPropagation();
+        this._mqMinutes = Number(el.value) || 15;
+      };
+      el.onchange = (e) => {
+        e.stopPropagation();
+        this._mqMinutes = Number(el.value) || 15;
+      };
+    });
+    on('[data-mq-preset]', (el) => {
+      this._mqMinutes = Number(el.dataset.mqPreset) || 15;
+      this._render();
+    });
     on('[data-pause-group]', (el) => {
       this._cmd('pause_group', { groupId: el.dataset.pauseGroup, hours: Number(el.dataset.hours) });
     });
@@ -616,6 +661,19 @@ class ZroshuaCard extends HTMLElement {
       .join('');
 
     const mq = a.manualQueue || [];
+    // Match add-on dashboard: while something is waiting, show every active zone
+    // as the head of the line; otherwise only show active manual runs.
+    const mqHead = mq.length ? a.active || [] : (a.active || []).filter((r) => r.manual);
+    const mqHeadRows = mqHead
+      .map(
+        (r) =>
+          `<div class="row small"><span class="grow">${this._chip(r.manual ? 'running' : 'scheduled', 'ok')} <b>${this._esc(
+            r.zoneName,
+          )}</b>
+            <span class="muted small"> · ${Math.round(r.plannedMin || 0)}m · ${this._left(r.endsAt)}</span></span>
+            ${this._btn({ cls: 'danger icon', data: `data-stop-zone="${this._esc(r.zoneId)}"`, icon: I.stop, title: 'Stop' })}</div>`,
+      )
+      .join('');
     const mqRows = mq
       .map(
         (q) =>
@@ -624,6 +682,10 @@ class ZroshuaCard extends HTMLElement {
             ${this._btn({ cls: 'ghost icon', data: `data-mq-remove="${this._esc(q.key)}"`, icon: I.x, title: 'Remove from queue' })}</div>`,
       )
       .join('');
+    const mqBody =
+      mqHeadRows || mqRows
+        ? `${mqHeadRows}${mqRows}`
+        : '<div class="muted small">Nothing in the manual queue yet. Add a zone to start or line one up.</div>';
 
     const journal = (a.journal || [])
       .slice(0, 12)
@@ -675,9 +737,13 @@ class ZroshuaCard extends HTMLElement {
         </div>`,
       manual_queue: `<div class="panel">
           <div class="sec top rowish"><span>Manual queue</span>
-            ${mq.length ? this._btn({ cls: 'ghost', data: 'data-mq-clear', icon: I.x, label: 'Clear' }) : ''}
+            <span class="mq-actions">
+              ${mq.length ? this._btn({ cls: 'ghost', data: 'data-mq-clear', icon: I.x, label: 'Clear' }) : ''}
+              ${this._btn({ cls: 'ghost', data: 'data-mq-add', icon: I.plus, label: 'Add zone' })}
+            </span>
           </div>
-          ${mqRows || '<div class="muted small">No manual runs queued. Tap a zone while watering to add more, or use Water now.</div>'}
+          <div class="muted tiny" style="margin-bottom:6px">Runs one after another. Duration is for this run only.</div>
+          ${mqBody}
         </div>`,
       journal: `<div class="panel">
           <div class="sec top">Journal</div>
@@ -694,7 +760,63 @@ class ZroshuaCard extends HTMLElement {
         ${body || '<div class="muted">No sections selected — edit this card in Lovelace and choose Dashboard sections.</div>'}
         ${this._sheet(a)}
         ${this._scheduleSheet()}
+        ${this._addMqSheet(a)}
       </div>`;
+  }
+
+  _addMqSheet(a) {
+    if (!this._addMq) return '';
+    const anim = this._openAnim ? ' anim' : '';
+    this._openAnim = false;
+    const enabled = (a.zones || []).filter((z) => z.enabled && !z.running && !z.queued);
+    // Also allow currently idle enabled zones; if all busy, still list enabled for feedback.
+    const choices = enabled.length ? enabled : (a.zones || []).filter((z) => z.enabled);
+    if (!this._mqZoneId && choices[0]) {
+      this._mqZoneId = choices[0].id;
+      this._mqMinutes = Math.round(choices[0].baseMin || 15);
+    }
+    const opts = choices
+      .map(
+        (z) =>
+          `<option value="${this._esc(z.id)}" ${z.id === this._mqZoneId ? 'selected' : ''}>${this._esc(z.name)}${
+            z.running || z.queued ? ' (busy)' : ''
+          }</option>`,
+      )
+      .join('');
+    const z = choices.find((x) => x.id === this._mqZoneId) || choices[0];
+    const base = Math.round(z?.baseMin || 15);
+    const max = z?.maxMin || 999;
+    const presets = [...new Set([5, 10, 15, base])].filter((m) => m > 0 && m <= max).sort((x, y) => x - y);
+    const presetBtns = presets
+      .map(
+        (m) =>
+          `<button type="button" class="btn ${m === Number(this._mqMinutes) ? 'primary' : 'ghost'}" data-mq-preset="${m}">${m}m</button>`,
+      )
+      .join('');
+    return `<div class="ovl" data-close-mq></div><div class="sheet sheet-wide${anim}">
+      <div class="shead">
+        <div class="grow"><b>Add to manual queue</b>
+          <div class="muted small">Starts now if nothing is watering; otherwise waits in line.</div>
+        </div>
+        ${this._btn({ cls: 'ghost icon', data: 'data-close-mq', icon: I.x, title: 'Close' })}
+      </div>
+      ${
+        choices.length
+          ? `<label class="muted small">Zone</label>
+             <select class="mq-select" data-mq-zone>${opts}</select>
+             <div class="sec">Duration</div>
+             <div class="srow">${presetBtns}</div>
+             <label class="sch-dur" style="margin-top:8px">min
+               <input type="number" min="1" max="${max}" step="1" data-mq-min value="${Math.round(this._mqMinutes)}" />
+             </label>
+             <div class="srow" style="margin-top:12px">
+               ${this._btn({ cls: 'ghost', data: 'data-close-mq', label: 'Cancel' })}
+               ${this._btn({ cls: 'primary', data: 'data-mq-submit', icon: I.play, label: 'Add' })}
+             </div>`
+          : `<div class="muted">No enabled zones available.</div>
+             <div class="srow" style="margin-top:12px">${this._btn({ cls: 'ghost', data: 'data-close-mq', label: 'Close' })}</div>`
+      }
+    </div>`;
   }
 
   _scheduleSheet() {
@@ -1080,6 +1202,10 @@ const STYLE = `
   .sec.top { margin-top: 0; }
   .rowish { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
   .sheet-wide { width: min(520px, calc(100vw - 20px)); max-height: min(85vh, 720px); overflow: auto; }
+  .mq-actions { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; }
+  .mq-select { width: 100%; margin: 4px 0 8px; padding: 9px 10px; border-radius: 10px;
+    border: 1px solid var(--divider-color); background: var(--card-background-color); color: var(--primary-text-color);
+    font-size: .95rem; }
   .tcfg-row { display: flex; align-items: center; gap: 10px; padding: 8px 4px; cursor: pointer;
     border-bottom: 1px solid var(--divider-color); font-weight: 600; }
   .tcfg-row input { width: 18px; height: 18px; accent-color: var(--z-ok); }
