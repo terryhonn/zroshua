@@ -157,6 +157,20 @@ the run is skipped with a journal reason).
   is set to ignore it. Replaces the "midday cooling schedule + sensor condition" pattern
   with one setting.
 
+## Controllers (ESPHome boards)
+
+Settings → **Controllers**: name each multi-relay board, optionally an ESPHome **status**
+binary sensor (`platform: status` — on = online), and the switch/valve entities on that
+board. The dashboard and Lovelace **Controllers** section show green / yellow / red chips
+(online / degraded / offline). Status sensor offline or all entities unavailable → red;
+some entities unavailable → yellow; otherwise green.
+
+```yaml
+binary_sensor:
+  - platform: status
+    name: "Status"
+```
+
 ## Fault control
 
 - Check-back after every command (3 attempts × 15 s poll, suited to ESPHome / Wi‑Fi valves):
