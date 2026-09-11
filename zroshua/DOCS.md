@@ -183,8 +183,8 @@ binary_sensor:
   `unavailable` for 20 s) Zroshua re-sends ON up to 3 times. After an add-on restart a
   run with time left is turned back on instead of being abandoned.
 - Independent per-zone max-runtime failsafe.
-- Zones switched on outside Zroshua are either adopted as manual runs (with auto-off) or
-  switched off, per your policy.
+- Zones switched on outside Zroshua are turned off and warned by default (safer with
+  ESPHome dropouts). Optional policy still allows adopting as a timed manual run.
 - On startup, persisted active runs are resumed and any orphaned "on" zones are reconciled off.
 - Optional idle-flow leak detection per source (flow while nothing should be running).
 

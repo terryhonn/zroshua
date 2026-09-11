@@ -150,7 +150,7 @@ export const defaultSettings: Settings = {
     digest: { enabled: false, time: '21:00' },
     quiet: { enabled: false, from: '22:00', to: '07:00' },
   },
-  externalOnPolicy: 'adopt',
+  externalOnPolicy: 'turn_off',
   preStartCheck: { enabled: true, minutes: 30 },
   controllers: [],
 };

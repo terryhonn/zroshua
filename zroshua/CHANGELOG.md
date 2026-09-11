@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.22
+
+- **Default external-on policy is now turn off and warn** (was adopt as manual).
+  Safer once Zroshua is the only irrigation controller; adopt remains available
+  in Settings for migrations. Existing installs that already saved “Adopt” keep
+  that until you change it under Limits & misc.
+
 ## 0.4.21
 
 - **Fix: unavailable at stop no longer becomes a manual adopt.** OFF check-back

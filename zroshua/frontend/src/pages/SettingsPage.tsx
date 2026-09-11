@@ -714,13 +714,18 @@ export default function SettingsPage() {
             />
           </Group>
           <Select
-            label={t('If a zone is switched on outside Zroshua')}
+            label={
+              <HintLabel
+                label={t('If a zone is switched on outside Zroshua')}
+                hint={t('Recommended: turn it off. Use adopt only if another scheduler or HA switch still starts valves outside Zroshua and you want a timed auto-off.')}
+              />
+            }
             data={[
-              { value: 'adopt', label: t('Adopt as a manual run (auto-off by timer)') },
               { value: 'turn_off', label: t('Turn it off and warn') },
+              { value: 'adopt', label: t('Adopt as a manual run (auto-off by timer)') },
             ]}
-            value={s.externalOnPolicy}
-            onChange={(v) => setS({ ...s, externalOnPolicy: (v as any) ?? 'adopt' })}
+            value={s.externalOnPolicy === 'adopt' ? 'adopt' : 'turn_off'}
+            onChange={(v) => setS({ ...s, externalOnPolicy: (v as 'adopt' | 'turn_off') ?? 'turn_off' })}
           />
         </Stack>
       </Card>
