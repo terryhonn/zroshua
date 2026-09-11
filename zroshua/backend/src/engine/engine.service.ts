@@ -864,15 +864,25 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
       const zone = this.zone(group.zoneIds[i]);
       if (!zone || !zone.enabled) continue;
       if (zoneSel && !zoneSel.has(zone.id)) continue; // schedule waters a subset of the group
-      // Already watering this zone (resumed after restart, or a previous run
-      // still holding the valve). Queueing it again used to start the *next*
-      // sequential zone in parallel under a new groupRunId.
+      // Already watering this zone (resumed after restart, manual run, or a
+      // previous run still holding the valve). Queueing it again used to start
+      // the *next* sequential zone in parallel under a new groupRunId.
       if (
         this.active.some((a) => a.zoneId === zone.id) ||
         this.startingZones.has(zone.id) ||
         this.pendingStarts.some((p) => p.zoneId === zone.id)
-      )
+      ) {
+        const who = this.active.find((a) => a.zoneId === zone.id);
+        await this.skip(
+          group.id,
+          zone.id,
+          'already_running',
+          who?.manual
+            ? 'zone already watering (manual) — left out of this group run'
+            : 'zone already watering — left out of this group run',
+        );
         continue;
+      }
       if (this.faultZones.has(zone.id)) {
         await this.skip(group.id, zone.id, 'fault', 'zone is in fault state (stuck open — will not start)');
         continue;
@@ -1421,6 +1431,15 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
       this.escalateStuck(zone);
     } else if (zone) {
       this.unconfirmedOffZones.delete(zone.id);
+      // Confirmed OFF — drop stuck/unconfirmed lockout so later schedules can run.
+      if (this.faultZones.has(zone.id)) {
+        this.faultZones.delete(zone.id);
+        await this.journal.add('info', {
+          zoneId: zone.id,
+          code: 'fault_cleared',
+          detail: 'confirmed OFF — fault lockout cleared',
+        });
+      }
     }
 
     const now = Date.now();

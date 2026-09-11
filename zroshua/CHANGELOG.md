@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.23
+
+- **Fault lockout clears on confirmed OFF** (including a manual stop). Previously
+  a stuck/unconfirmed-OFF fault could linger after the valve was successfully
+  closed and keep skipping that zone on later group runs.
+- **Journal when a group run skips an already-watering zone** (`already_running`),
+  e.g. a manual Front Zone 2 still active when the morning schedule fires — no
+  longer a silent omission.
+
 ## 0.4.22
 
 - **Default external-on policy is now turn off and warn** (was adopt as manual).
