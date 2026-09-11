@@ -121,6 +121,12 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
   private pumpStopTimers = new Map<string, NodeJS.Timeout>();
   private firedOccurrences = new Set<string>();
   private faultZones = new Set<string>();
+  /**
+   * Zones whose OFF was not confirmed at end-of-run (entity unavailable/unknown,
+   * or still on). When the switch later reports `on`, do NOT adopt as external —
+   * force off / keep escalating instead.
+   */
+  private unconfirmedOffZones = new Set<string>();
   private lastWetTs = 0;
   private lastWetPersistTs = 0;
   private lastSoilCheck = 0;
@@ -1390,14 +1396,31 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
 
     const off = zone ? await this.switchWithCheckback(zone, false) : true;
     if (!off && zone) {
+      // Unavailable must not count as OFF — otherwise the run closes "cleanly",
+      // the valve stays open, and when the entity returns as `on` we wrongly
+      // adopt it as an external/manual run.
+      const after = this.zoneValveState(zone);
       this.faultZones.add(zone.id);
-      await this.journal.add('fault', { zoneId: zone.id, code: 'stuck_valve', detail: 'zone did not turn OFF — escalating' });
-      await this.notify.emit('fault', `🚨 CRITICAL: zone "${zone.name}" did not turn OFF (stuck valve). Shutting down the source pump.`);
+      this.unconfirmedOffZones.add(zone.id);
+      const code = after === 'on' ? 'stuck_valve' : 'off_unconfirmed';
+      const detail =
+        after === 'on'
+          ? 'zone did not turn OFF — escalating'
+          : `zone OFF not confirmed (valve state: ${after}) — escalating; will not adopt as external if it reappears on`;
+      await this.journal.add('fault', { zoneId: zone.id, code, detail });
+      await this.notify.emit(
+        'fault',
+        after === 'on'
+          ? `🚨 CRITICAL: zone "${zone.name}" did not turn OFF (stuck valve). Shutting down the source pump.`
+          : `🚨 CRITICAL: zone "${zone.name}" OFF not confirmed (${after}) — assuming still open, escalating. Will force off if it comes back online.`,
+      );
       if (src?.pumpEntity) {
         try { await this.ha.turn(src.pumpEntity, false); } catch { /* pump off is best effort here */ }
         this.pumpRefs.set(src.id, 0);
       }
       this.escalateStuck(zone);
+    } else if (zone) {
+      this.unconfirmedOffZones.delete(zone.id);
     }
 
     const now = Date.now();
@@ -1507,8 +1530,10 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
           }
         }
         await new Promise((r) => setTimeout(r, CHECKBACK_WAIT_MS));
-        if (!zone.entities.some((e) => this.ha.isOn(e))) {
+        // Require confirmed OFF — unavailable must not count as recovered.
+        if (this.zoneValveState(zone) === 'off') {
           this.faultZones.delete(zone.id);
+          this.unconfirmedOffZones.delete(zone.id);
           await this.journal.add('info', {
             zoneId: zone.id,
             code: 'stuck_recovered',
@@ -1535,8 +1560,11 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
       const deadline = Date.now() + CHECKBACK_WAIT_MS;
       while (Date.now() < deadline) {
         await new Promise((r) => setTimeout(r, 500));
-        const states = zone.entities.map((e) => this.ha.isOn(e));
-        if (on ? states.every(Boolean) : states.every((s) => !s)) return true;
+        // Unavailable/unknown is neither ON nor OFF — never treat it as success
+        // for either direction (especially OFF: that caused false "run ended"
+        // then external adopt when the valve reappeared still open).
+        const st = this.zoneValveState(zone);
+        if (on ? st === 'on' : st === 'off') return true;
       }
     }
     return false;
@@ -1679,6 +1707,29 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
       !this.active.some((a) => a.zoneId === zone.id) &&
       !this.startingZones.has(zone.id)
     ) {
+      // After an unconfirmed OFF (e.g. ESPHome unavailable at schedule end), the
+      // valve may still be open. When it reports `on` again, force it off —
+      // never adopt as a new manual run.
+      if (this.unconfirmedOffZones.has(zone.id)) {
+        await this.journal.add('fault', {
+          zoneId: zone.id,
+          code: 'off_reappeared',
+          detail: `entity came back ON after unconfirmed OFF (${oldState?.state ?? '?'}→${newState?.state}) — forcing off, not adopting`,
+        });
+        await this.notify.emit(
+          'fault',
+          `🚨 Zone "${zone.name}" came back ON after an unconfirmed stop — forcing off (not adopting as manual).`,
+        );
+        try {
+          for (const e of zone.entities) await this.ha.turn(e, false);
+        } catch {
+          /* escalate below */
+        }
+        this.faultZones.add(zone.id);
+        this.escalateStuck(zone);
+        this.broadcastState();
+        return;
+      }
       if (settings.externalOnPolicy === 'turn_off') {
         await this.journal.add('info', { zoneId: zone.id, code: 'external_on', detail: 'turned on outside Zroshua — turning off' });
         try { await this.ha.turn(entityId, false); } catch { /* logged above */ }

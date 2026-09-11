@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.21
+
+- **Fix: unavailable at stop no longer becomes a manual adopt.** OFF check-back
+  used to treat `unavailable`/`unknown` as “off” (`isOn` is false), so a schedule
+  end could close cleanly while the valve was still open. When the ESP came back
+  `on`, Zroshua adopted it as an external/manual run. Check-back now requires a
+  **confirmed** on/off via `zoneValveState`. Failed/unconfirmed OFF journals
+  `stuck_valve` or `off_unconfirmed`, escalates, and marks the zone so a later
+  `on` forces off (`off_reappeared`) instead of adopting.
+
 ## 0.4.20
 
 - **Controllers status strip.** Settings → Controllers: name each ESPHome (or other)
