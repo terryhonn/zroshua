@@ -614,6 +614,8 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
         return void (await this.engine.clearManualQueue());
       case 'update_schedule':
         return void (await this.engine.updateSchedule(cmd.kind === 'zone' ? 'zone' : 'group', cmd.targetId, cmd.schedule));
+      case 'rain_delay':
+        return void (await this.engine.setHaRainDelay(cmd.on === true || cmd.on === 1 || cmd.on === '1'));
       default:
         this.log.warn(`unknown command action: ${cmd?.action}`);
     }

@@ -483,10 +483,39 @@ export default function DashboardPage({ state, journalTick = 0 }: { state: Engin
       <SimpleGrid cols={{ base: 2, xs: 3, md: 6 }}>
         {tileOrder.map((id) => tiles[id])}
       </SimpleGrid>
-      {state?.rainDelayActive && (
-        <Badge size="lg" variant="light" color="orange" leftSection={<IconAlertTriangle size={14} />}>
-          {t('HA rain delay is on — automatic watering will skip')}
-        </Badge>
+      {settings?.rainDelay?.enabled && settings.rainDelay.entity && (
+        <Button
+          fullWidth
+          variant="light"
+          color={state?.rainDelayActive ? 'orange' : 'gray'}
+          leftSection={<IconAlertTriangle size={16} />}
+          onClick={() =>
+            act(
+              () => api.post('/rain-delay', { on: !state?.rainDelayActive }),
+              state?.rainDelayActive
+                ? t('Rain delay cleared — schedules will run')
+                : t('Rain delay on — automatic watering will skip'),
+            )
+          }
+          styles={{
+            root: { height: 'auto', padding: '10px 14px' },
+            inner: { justifyContent: 'flex-start', alignItems: 'flex-start' },
+            label: { whiteSpace: 'normal', textAlign: 'left' },
+          }}
+        >
+          <Stack gap={2}>
+            <Text fw={600} size="sm">
+              {state?.rainDelayActive
+                ? t('HA rain delay is on — automatic watering will skip')
+                : t('Rain delay is off')}
+            </Text>
+            <Text size="sm" c="dimmed">
+              {state?.rainDelayActive
+                ? t('Click to resume normal schedules')
+                : t('Click to pause automatic schedules')}
+            </Text>
+          </Stack>
+        </Button>
       )}
       <Grid>
         <Grid.Col span={{ base: 12, md: 7 }}>

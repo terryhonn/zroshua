@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.25
+
+- **Toggle HA rain delay from the dashboard.** The rain-delay banner is always
+  shown when an HA entity is configured. When it is on: *HA rain delay is on —
+  automatic watering will skip* / *Click to resume normal schedules*. When off,
+  click to pause automatic schedules. Same control on the Lovelace card.
+
 ## 0.4.24
 
 - **HA rain delay.** Settings → Sensors: point at a Home Assistant boolean

@@ -359,6 +359,7 @@ class ZroshuaCard extends HTMLElement {
       if (this._sel) { this._sel = null; this._render(); }
     });
     on('[data-stop-all]', () => this._cmd('stop_all'));
+    on('[data-rain-delay]', (el) => this._cmd('rain_delay', { on: el.dataset.rainDelay === '1' }));
     on('[data-pause-all]', (el) => this._cmd('pause', { hours: Number(el.dataset.pauseAll) }));
     on('[data-extend-zone]', (el) => this._cmd('extend_zone', { zoneId: el.dataset.extendZone, minutes: Number(el.dataset.min) || 5 }));
     on('[data-mq-remove]', (el) => this._cmd('manual_queue_remove', { key: el.dataset.mqRemove }));
@@ -647,20 +648,14 @@ class ZroshuaCard extends HTMLElement {
         }</span></div>`;
       })
       .join('');
-    const rainDelayChip = a.rainDelay?.active
-      ? this._chip('rain delay ON — auto watering skipped', 'warn', I.rain)
-      : '';
     const weatherBlock = w?.entity
       ? `<div class="sec">Weather</div>
-         ${rainDelayChip}
          <div class="wx"><b class="wx-temp">${this._fmtTemp(w.temperatureC, tempUnit)}</b>
            <span class="muted">${this._esc(w.condition || '')}</span>
            ${w.humidity != null ? `<span class="muted">💧 ${w.humidity}%</span>` : ''}
          </div>
          <div class="fcgrid">${forecast}</div>`
-      : rainDelayChip
-        ? `<div class="sec">Weather</div>${rainDelayChip}`
-        : '';
+      : '';
 
     const pumps = (a.pumpStates || [])
       .map((p) => this._chip(p.on ? `pump ${p.name}: ON` : `pump ${p.name}: off`, p.on ? 'ok' : 'muted'))
@@ -802,8 +797,23 @@ class ZroshuaCard extends HTMLElement {
       .map((id) => blocks[id] || '')
       .join('');
 
+    const rainDelayBar = a.rainDelay?.entity
+      ? a.rainDelay.active
+        ? `<button type="button" class="rdband on" data-rain-delay="0">
+            <span class="i">${I.rain}</span>
+            <span class="grow"><b>HA rain delay is on — automatic watering will skip</b>
+            <span class="muted small">Click to resume normal schedules</span></span>
+          </button>`
+        : `<button type="button" class="rdband" data-rain-delay="1">
+            <span class="i">${I.rain}</span>
+            <span class="grow"><b>Rain delay is off</b>
+            <span class="muted small">Click to pause automatic schedules</span></span>
+          </button>`
+      : '';
+
     return `
       <div class="pad dash">
+        ${rainDelayBar}
         ${body || '<div class="muted">No sections selected — edit this card in Lovelace and choose Dashboard sections.</div>'}
         ${this._sheet(a)}
         ${this._scheduleSheet()}
@@ -1246,6 +1256,15 @@ const STYLE = `
   .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
   .dash .panel { border: 1px solid var(--divider-color); border-radius: 14px; padding: 10px 12px 12px; margin-bottom: 10px;
     background: color-mix(in srgb, var(--secondary-background-color) 35%, transparent); }
+  .rdband { display: flex; align-items: flex-start; gap: 10px; width: 100%; margin: 0 0 10px; padding: 10px 12px;
+    border-radius: 14px; border: 1px solid var(--divider-color); background: color-mix(in srgb, var(--secondary-background-color) 35%, transparent);
+    color: inherit; text-align: left; cursor: pointer; font: inherit; }
+  .rdband .grow { display: flex; flex-direction: column; gap: 2px; }
+  .rdband .i { width: 22px; height: 22px; flex-shrink: 0; margin-top: 1px; }
+  .rdband .i svg { width: 22px; height: 22px; fill: currentColor; }
+  .rdband.on { border-color: color-mix(in srgb, var(--z-warn) 55%, var(--divider-color));
+    background: color-mix(in srgb, var(--z-warn) 16%, transparent); }
+  @media (hover: hover) { .rdband:hover { filter: brightness(1.08); } }
   .sec.top { margin-top: 0; }
   .rowish { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
   .sheet-wide { width: min(520px, calc(100vw - 32px)); }

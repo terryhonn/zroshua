@@ -2886,6 +2886,16 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
     return `${dur} (until ${t})`;
   }
 
+  /** Flip the configured HA rain-delay entity. Automatic-run skip follows state_changed. */
+  async setHaRainDelay(on: boolean) {
+    const settings = await this.config.getSettings();
+    const entity = settings.rainDelay?.entity;
+    if (!settings.rainDelay?.enabled || !entity) throw new Error('Rain delay is not configured');
+    this.lastRainDelayOn = on;
+    this.broadcastState();
+    await this.ha.turn(entity, on);
+  }
+
   /** Pause all automatic watering for `hours` (0 = resume now). Manual runs are unaffected. */
   async setGlobalPause(hours: number) {
     this.snoozeUntil = hours > 0 ? Date.now() + hours * 3600_000 : 0;

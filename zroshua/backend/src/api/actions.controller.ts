@@ -126,6 +126,12 @@ export class ActionsController {
     return { ok: true };
   }
 
+  @Post('rain-delay')
+  async rainDelay(@Body() body: { on?: boolean }) {
+    await this.engine.setHaRainDelay(!!body?.on);
+    return { ok: true, on: !!body?.on };
+  }
+
   @Post('snooze')
   async snooze(@Body() body: { hours: number }) {
     await this.engine.setGlobalPause(body?.hours ?? 0);
