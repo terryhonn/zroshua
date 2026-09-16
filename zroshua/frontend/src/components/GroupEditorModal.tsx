@@ -159,6 +159,16 @@ export default function GroupEditorModal({
               />
             ))}
 
+          <Switch
+            label={
+              <HintLabel
+                label={t('Ignore rain delay')}
+                hint={t('When on, this group still waters automatically while the HA rain-delay boolean is on. Individual zones can also ignore rain delay.')}
+              />
+            }
+            checked={!!editing.ignoreRainDelay}
+            onChange={(e) => setEditing({ ...editing, ignoreRainDelay: e.currentTarget.checked })}
+          />
           <Switch label={t('Enabled')} checked={editing.enabled !== false} onChange={(e) => setEditing({ ...editing, enabled: e.currentTarget.checked })} />
           <Button onClick={save}>{t('Save')}</Button>
         </Stack>

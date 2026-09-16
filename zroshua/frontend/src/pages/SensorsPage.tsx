@@ -111,6 +111,33 @@ export default function SensorsPage() {
 
       <Card withBorder>
         <Group justify="space-between" mb="sm">
+          <HintTitle
+            title={t('Rain delay')}
+            hint={
+              <>
+                {t('Master pause from Home Assistant, typically input_boolean.irrigation_rain_delay.')}
+                <br />
+                <br />
+                {t('When that entity is ON, automatic schedules / soil / heat skip. Groups, schedules, or zones can ignore rain delay (covered beds, greenhouse). Manual Water now still runs. Upcoming waterings and the journal show the skip reason.')}
+              </>
+            }
+          />
+          <Switch
+            label={t('Enabled')}
+            checked={!!s.rainDelay?.enabled}
+            onChange={(e) => setS({ ...s, rainDelay: { ...(s.rainDelay ?? { entity: null }), enabled: e.currentTarget.checked } })}
+          />
+        </Group>
+        <EntitySelect
+          label={<HintLabel label={t('HA entity')} hint={t('ON = skip automatic watering. Unavailable = allow.')} />}
+          value={s.rainDelay?.entity ?? null}
+          onChange={(v) => setS({ ...s, rainDelay: { ...(s.rainDelay ?? { enabled: false }), entity: v } })}
+          domains={['input_boolean', 'switch', 'binary_sensor']}
+        />
+      </Card>
+
+      <Card withBorder>
+        <Group justify="space-between" mb="sm">
           <Title order={4}>{t('Soil moisture triggers')}</Title>
           <Button
             size="xs"

@@ -276,6 +276,11 @@ export default function ZoneEditorModal({
               onChange={(e) => setEditing({ ...editing, ignore: { ...editing.ignore, rain_sensor: e.currentTarget.checked } })}
             />
             <Switch
+              label={t('Ignore rain delay')}
+              checked={!!editing.ignore?.rain_delay}
+              onChange={(e) => setEditing({ ...editing, ignore: { ...editing.ignore, rain_delay: e.currentTarget.checked } })}
+            />
+            <Switch
               label={t('Ignore weather')}
               checked={!!editing.ignore?.weather}
               onChange={(e) => setEditing({ ...editing, ignore: { ...editing.ignore, weather: e.currentTarget.checked } })}

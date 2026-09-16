@@ -142,6 +142,12 @@ export default function ScheduleEditor({
           onChange={(v) => onChange({ ...schedule, mode: v as Schedule['mode'] })}
         />
         <Group gap="xs">
+          <Switch
+            size="xs"
+            label={t('Ignore rain delay')}
+            checked={!!schedule.ignoreRainDelay}
+            onChange={(e) => onChange({ ...schedule, ignoreRainDelay: e.currentTarget.checked })}
+          />
           <Switch size="xs" label={t('Enabled')} checked={schedule.enabled} onChange={(e) => onChange({ ...schedule, enabled: e.currentTarget.checked })} />
           <ActionIcon variant="subtle" color="red" onClick={onDelete}>
             <IconTrash size={16} />

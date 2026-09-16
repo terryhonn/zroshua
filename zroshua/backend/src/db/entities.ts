@@ -68,6 +68,8 @@ export type Schedule = {
   /** subset of the group's zones this schedule waters; null/undefined = all zones */
   zoneSelection?: string[] | null;
   conditions?: ScheduleCondition[]; // all must pass at start time (unavailable data = pass)
+  /** When true, this schedule still runs while HA rain delay is on. */
+  ignoreRainDelay?: boolean;
   enabled: boolean;
 };
 
@@ -85,6 +87,8 @@ export class Group {
   @Column({ default: true }) enabled: boolean;
   @Column({ type: 'bigint', nullable: true }) snoozeUntil: number | null;
   @Column({ default: 0 }) orderIndex: number;
+  /** When true, this group's automatic runs ignore the HA rain-delay boolean. */
+  @Column({ default: false }) ignoreRainDelay: boolean;
 }
 
 export type RuleType = 'mutex' | 'order' | 'parallel_ok';
@@ -136,6 +140,7 @@ export type StopReason =
   | 'completed'
   | 'manual_stop'
   | 'rain'
+  | 'rain_delay'
   | 'fault'
   | 'max_runtime'
   | 'shutdown'

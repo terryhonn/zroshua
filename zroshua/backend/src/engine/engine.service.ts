@@ -41,6 +41,8 @@ interface QueuedRun {
   waitReason?: string;
   /** survive rain-sensor events and skip the wet check (soil triggers in a greenhouse etc.) */
   ignoreRain?: boolean;
+  /** survive HA rain-delay (schedule/group/zone ignore, or greenhouse soil/heat trigger) */
+  ignoreRainDelay?: boolean;
 }
 
 interface ActiveRun {
@@ -55,6 +57,7 @@ interface ActiveRun {
   manual: boolean;
   triggeredBy: string;
   ignoreRain?: boolean;
+  ignoreRainDelay?: boolean;
   energySnapshotKwh: number | null;
   energyIntegralWh: number;
   lastSampleTs: number;
@@ -140,6 +143,8 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
   /** Global pause: skip all automatic runs until this ms timestamp. Manual runs ignore it. */
   snoozeUntil = 0;
   paused = false;
+  /** Last computed HA rain-delay state (for sync snapshot / Lovelace). */
+  private lastRainDelayOn = false;
   /** Active sequential manual chain (`manual-seq:<ts>`); reused while manual work is outstanding. */
   private currentManualChainId: string | null = null;
 
@@ -440,6 +445,12 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
       const lastFired = await this.config.getKV<number>(`tempFired:${t.id}`, 0);
       if (now - lastFired < t.cooldownHours * 3600_000) continue;
       if (!t.ignoreRainSensor && (await this.rainIsWet(settings))) continue;
+      if (!t.ignoreRainSensor && this.rainDelayActive(settings)) {
+        const zone = t.targetKind === 'zone' ? this.zone(t.targetId) : undefined;
+        const group =
+          t.targetKind === 'group' ? this.group(t.targetId) : this.groups.find((g) => zone && g.zoneIds.includes(zone.id)) ?? null;
+        if (this.honorsRainDelay(zone, group)) continue;
+      }
       await this.config.setKV(`tempFired:${t.id}`, now);
       await this.journal.add('info', {
         code: 'temp_trigger',
@@ -461,6 +472,7 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
             enqueuedAt: now,
             notBefore: 0,
             ignoreRain: !!t.ignoreRainSensor,
+            ignoreRainDelay: !!t.ignoreRainSensor,
           });
         }
       } else {
@@ -710,6 +722,8 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
     const settings = await this.config.getSettings();
     if ((await this.rainIsWet(settings)) && !zone.ignore?.rain_sensor)
       return this.skip(groupId, zone.id, 'rain_sensor', 'rain sensor is wet (or in dry-out window)');
+    if (this.rainDelayActive(settings) && this.honorsRainDelay(zone, containing, schedule))
+      return this.skip(groupId, zone.id, 'rain_delay', this.rainDelayDetail(settings));
     if (await this.soilBlocks(zone))
       return this.skip(groupId, zone.id, 'soil_wet', 'soil moisture above block threshold');
     const cond = await this.evaluateConditions(schedule, groupId);
@@ -735,6 +749,7 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
       priority: containing?.priority ?? 0,
       enqueuedAt: now,
       notBefore: 0,
+      ignoreRainDelay: !this.honorsRainDelay(zone, containing, schedule),
     });
     this.broadcastState();
   }
@@ -910,6 +925,10 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
         await this.skip(group.id, zone.id, 'rain_sensor', 'rain sensor is wet (or in dry-out window)');
         continue;
       }
+      if (!manual && !ignoreRain && this.rainDelayActive(settings) && this.honorsRainDelay(zone, group, schedule)) {
+        await this.skip(group.id, zone.id, 'rain_delay', this.rainDelayDetail(settings));
+        continue;
+      }
       if (!manual && (await this.soilBlocks(zone))) {
         await this.skip(group.id, zone.id, 'soil_wet', 'soil moisture above block threshold');
         continue;
@@ -946,6 +965,7 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
           enqueuedAt: now,
           notBefore: now + segments[segment].delayMs,
           ignoreRain,
+          ignoreRainDelay: ignoreRain || !this.honorsRainDelay(zone, group, schedule),
         });
       }
       enqueued++;
@@ -1109,6 +1129,13 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
       if (await this.rainBlocks(q, settings)) {
         this.queue = this.queue.filter((x) => x.key !== q.key);
         await this.skip(q.groupId, q.zoneId, 'rain_sensor', 'rain sensor is wet (or in dry-out window)');
+        await this.settleEmptyGroupRuns();
+        this.broadcastState();
+        continue;
+      }
+      if (this.rainDelayBlocksQueued(q, settings)) {
+        this.queue = this.queue.filter((x) => x.key !== q.key);
+        await this.skip(q.groupId, q.zoneId, 'rain_delay', this.rainDelayDetail(settings));
         await this.settleEmptyGroupRuns();
         this.broadcastState();
         continue;
@@ -1283,6 +1310,12 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
       this.broadcastState();
       return;
     }
+    if (this.rainDelayBlocksQueued(q, await this.config.getSettings())) {
+      await this.skip(q.groupId, q.zoneId, 'rain_delay', this.rainDelayDetail(await this.config.getSettings()));
+      await this.settleEmptyGroupRuns();
+      this.broadcastState();
+      return;
+    }
     this.startingZones.add(zone.id);
     try {
       const src = this.source(zone.sourceId);
@@ -1327,6 +1360,7 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
         manual: q.manual,
         triggeredBy: q.triggeredBy,
         ignoreRain: q.ignoreRain,
+        ignoreRainDelay: q.ignoreRainDelay,
         energySnapshotKwh: snapshot,
         energyIntegralWh: 0,
         lastSampleTs: now,
@@ -1376,7 +1410,7 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
     this.broadcastState();
   }
 
-  async stopAll(reason: 'manual_stop' | 'rain' = 'manual_stop', predicate?: (a: ActiveRun) => boolean) {
+  async stopAll(reason: 'manual_stop' | 'rain' | 'rain_delay' = 'manual_stop', predicate?: (a: ActiveRun) => boolean) {
     for (const run of [...this.active]) {
       if (predicate && !predicate(run)) continue;
       await this.finishRun(run, reason);
@@ -1510,6 +1544,8 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
       (await this.config.getSettings()).notifications.groupLevel;
     if (reason === 'rain') {
       await this.notify.emit('stop_rain', `🌧 Watering of "${zone?.name ?? run.zoneId}" stopped: rain detected.`);
+    } else if (reason === 'rain_delay') {
+      await this.notify.emit('stop_rain', `🌧 Watering of "${zone?.name ?? run.zoneId}" stopped: HA rain delay.`);
     } else if (groupLevel) {
       if (groupFinished) {
         const g = this.group(run.groupId);
@@ -1687,6 +1723,45 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
     return Date.now() - this.lastWetTs < s.rainSensor.dryOutHours * 3600_000;
   }
 
+  rainDelayActive(settings: Awaited<ReturnType<ConfigService['getSettings']>>): boolean {
+    const rd = settings.rainDelay;
+    const on = !!(rd?.enabled && rd.entity && this.ha.isOn(rd.entity));
+    this.lastRainDelayOn = on;
+    return on;
+  }
+
+  private rainDelayDetail(settings: Awaited<ReturnType<ConfigService['getSettings']>>): string {
+    const id = settings.rainDelay?.entity ?? 'rain delay';
+    const name = this.ha.getState(id)?.attributes?.friendly_name;
+    return name ? `HA rain delay is on (${name})` : `HA rain delay is on (${id})`;
+  }
+
+  /**
+   * Whether this zone's automatic run should obey the master HA rain-delay boolean.
+   * Schedule ignore wins, then group ignore, then per-zone ignore.rain_delay.
+   */
+  private honorsRainDelay(
+    zone: Zone | undefined,
+    group: Group | null | undefined,
+    schedule?: import('../db/entities').Schedule,
+  ): boolean {
+    if (schedule?.ignoreRainDelay) return false;
+    if (group?.ignoreRainDelay) return false;
+    if (zone?.ignore?.rain_delay) return false;
+    return true;
+  }
+
+  private rainDelayBlocksQueued(
+    q: QueuedRun,
+    settings: Awaited<ReturnType<ConfigService['getSettings']>>,
+  ): boolean {
+    if (q.manual || q.ignoreRainDelay) return false;
+    if (!this.rainDelayActive(settings)) return false;
+    const zone = this.zone(q.zoneId);
+    const group = q.groupId ? this.group(q.groupId) : this.groups.find((g) => g.zoneIds.includes(q.zoneId)) ?? null;
+    return this.honorsRainDelay(zone, group);
+  }
+
   private async onStateChanged(entityId: string, newState: any, oldState: any) {
     const settings = await this.config.getSettings();
 
@@ -1713,6 +1788,30 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
           return true;
         });
         await this.settleEmptyGroupRuns();
+        this.broadcastState();
+      }
+    }
+
+    // master HA rain delay (input_boolean) turned on/off
+    const rd = settings.rainDelay;
+    if (rd?.enabled && rd.entity && entityId === rd.entity) {
+      const on = newState?.state === 'on';
+      const wasOn = oldState?.state === 'on';
+      if (on && !wasOn) {
+        await this.journal.add('info', { code: 'rain_delay_on', detail: this.rainDelayDetail(settings) });
+        const blocked = this.queue.filter((q) => this.rainDelayBlocksQueued(q, settings));
+        this.queue = this.queue.filter((q) => !blocked.includes(q));
+        for (const q of blocked) await this.skip(q.groupId, q.zoneId, 'rain_delay', 'HA rain delay turned on before this zone ran');
+        await this.stopAll('rain_delay', (a) => {
+          if (a.manual || a.ignoreRainDelay) return false;
+          const z = this.zone(a.zoneId);
+          const g = a.groupId ? this.group(a.groupId) : this.groups.find((gr) => z && gr.zoneIds.includes(z.id)) ?? null;
+          return this.honorsRainDelay(z, g);
+        });
+        await this.settleEmptyGroupRuns();
+        this.broadcastState();
+      } else if (!on && wasOn) {
+        await this.journal.add('info', { code: 'rain_delay_off', detail: `HA rain delay is off (${rd.entity})` });
         this.broadcastState();
       }
     }
@@ -1820,6 +1919,12 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
       // rain gate: by default a wet rain sensor postpones the trigger (it will
       // fire once dry); triggers marked ignoreRainSensor (greenhouse) fire anyway
       if (!t.ignoreRainSensor && (await this.rainIsWet(settings))) continue;
+      if (!t.ignoreRainSensor && this.rainDelayActive(settings)) {
+        const zone = t.targetKind === 'zone' ? this.zone(t.targetId) : undefined;
+        const group =
+          t.targetKind === 'group' ? this.group(t.targetId) : this.groups.find((g) => zone && g.zoneIds.includes(zone.id)) ?? null;
+        if (this.honorsRainDelay(zone, group)) continue;
+      }
       await this.config.setKV(`soilFired:${t.id}`, now);
       await this.journal.add('info', { code: 'soil_trigger', detail: `sensor ${t.sensor} at ${v}% < ${t.startBelowPct}%` });
       if (t.targetKind === 'zone') {
@@ -1838,6 +1943,7 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
             enqueuedAt: now,
             notBefore: 0,
             ignoreRain: !!t.ignoreRainSensor,
+            ignoreRainDelay: !!t.ignoreRainSensor,
           });
         }
       } else {
@@ -2304,6 +2410,13 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
     const fmt = (t: number) => new Date(t).toLocaleString(undefined, { hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'short' });
 
     if (this.snoozeUntil > ts) reasons.push(`all watering paused until ${fmt(this.snoozeUntil)}`);
+    if (this.rainDelayActive(settings)) {
+      const honoring = zones.filter((z) => this.honorsRainDelay(z, group, schedule));
+      if (honoring.length && honoring.length === zones.length)
+        reasons.push(this.rainDelayDetail(settings));
+      else if (honoring.length)
+        maybe.push(`rain delay would skip ${honoring.map((z) => z.name).join(', ')}`);
+    }
     if (group?.snoozeUntil && Number(group.snoozeUntil) > ts) reasons.push(`group paused until ${fmt(Number(group.snoozeUntil))}`);
     if (zones.length && zones.every((z) => z.snoozeUntil && Number(z.snoozeUntil) > ts))
       reasons.push('all zones paused');
@@ -2834,7 +2947,11 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
       const schedules = [...(g.schedules ?? [])];
       const i = schedules.findIndex((s) => s.id === schedule.id);
       if (i < 0) throw new Error('schedule not found on group');
-      schedules[i] = schedule;
+      schedules[i] = {
+        ...schedules[i],
+        ...schedule,
+        ignoreRainDelay: schedule.ignoreRainDelay ?? schedules[i].ignoreRainDelay,
+      };
       g.schedules = schedules;
       await this.groupsRepo.save(g);
     } else {
@@ -2843,7 +2960,11 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
       const schedules = [...(z.schedules ?? [])];
       const i = schedules.findIndex((s) => s.id === schedule.id);
       if (i < 0) throw new Error('schedule not found on zone');
-      schedules[i] = schedule;
+      schedules[i] = {
+        ...schedules[i],
+        ...schedule,
+        ignoreRainDelay: schedule.ignoreRainDelay ?? schedules[i].ignoreRainDelay,
+      };
       z.schedules = schedules;
       await this.zonesRepo.save(z);
     }
@@ -2864,6 +2985,7 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
       paused: this.paused,
       snoozeUntil: this.snoozeUntil || null,
       haConnected: this.ha.connected,
+      rainDelayActive: this.lastRainDelayOn,
       active: this.active.map((a) => ({
         zoneId: a.zoneId,
         zoneName: this.zone(a.zoneId)?.name ?? a.zoneId,

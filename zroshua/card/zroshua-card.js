@@ -287,6 +287,7 @@ class ZroshuaCard extends HTMLElement {
         skip: 'Skipped',
         fault: 'Fault',
         stop_rain: 'Rain stop',
+        rain_delay: 'Rain delay',
         info: 'Info',
         adjust: 'Adjust',
         system: 'System',
@@ -646,14 +647,20 @@ class ZroshuaCard extends HTMLElement {
         }</span></div>`;
       })
       .join('');
+    const rainDelayChip = a.rainDelay?.active
+      ? this._chip('rain delay ON — auto watering skipped', 'warn', I.rain)
+      : '';
     const weatherBlock = w?.entity
       ? `<div class="sec">Weather</div>
+         ${rainDelayChip}
          <div class="wx"><b class="wx-temp">${this._fmtTemp(w.temperatureC, tempUnit)}</b>
            <span class="muted">${this._esc(w.condition || '')}</span>
            ${w.humidity != null ? `<span class="muted">💧 ${w.humidity}%</span>` : ''}
          </div>
          <div class="fcgrid">${forecast}</div>`
-      : '';
+      : rainDelayChip
+        ? `<div class="sec">Weather</div>${rainDelayChip}`
+        : '';
 
     const pumps = (a.pumpStates || [])
       .map((p) => this._chip(p.on ? `pump ${p.name}: ON` : `pump ${p.name}: off`, p.on ? 'ok' : 'muted'))
@@ -702,7 +709,16 @@ class ZroshuaCard extends HTMLElement {
         const when = new Date(e.ts).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
         return `<div class="jrow">
           <div class="grow">
-            ${this._chip(this._kindLabel(e.kind) + (e.code ? `: ${e.code}` : ''), this._kindCls(e.kind))}
+            ${this._chip(
+              e.kind === 'skip' && e.code === 'rain_delay'
+                ? 'Skipped: rain delay'
+                : e.kind === 'info' && e.code === 'rain_delay_on'
+                  ? 'Rain delay on'
+                  : e.kind === 'info' && e.code === 'rain_delay_off'
+                    ? 'Rain delay off'
+                    : this._kindLabel(e.kind) + (e.code ? `: ${e.code}` : ''),
+              this._kindCls(e.kind),
+            )}
             ${e.target ? `<b class="jtarget">${this._esc(e.target)}</b>` : ''}
             ${e.detail ? `<div class="muted small jdetail">${this._esc(e.detail)}</div>` : ''}
           </div>

@@ -231,7 +231,10 @@ export default function DashboardPage({ state, journalTick = 0 }: { state: Engin
   const { data: settings } = useResource<Settings>('/settings');
   const tempUnit: TempUnit = settings?.tempUnit === 'F' ? 'F' : 'C';
   const volUnit: VolumeUnit = settings?.volumeUnit === 'gal' ? 'gal' : 'L';
-  const { data: upcoming, reload: reloadUpcoming } = useResource<Upcoming[]>('/upcoming', [state?.active.length]);
+  const { data: upcoming, reload: reloadUpcoming } = useResource<Upcoming[]>('/upcoming', [
+    state?.active.length,
+    state?.rainDelayActive,
+  ]);
   const { data: zones, reload: reloadZones } = useResource<Zone[]>('/zones');
   const { data: groups, reload: reloadGroups } = useResource<ZGroup[]>('/groups');
   const { data: sources } = useResource<WaterSource[]>('/sources');
@@ -480,6 +483,11 @@ export default function DashboardPage({ state, journalTick = 0 }: { state: Engin
       <SimpleGrid cols={{ base: 2, xs: 3, md: 6 }}>
         {tileOrder.map((id) => tiles[id])}
       </SimpleGrid>
+      {state?.rainDelayActive && (
+        <Badge size="lg" variant="light" color="orange" leftSection={<IconAlertTriangle size={14} />}>
+          {t('HA rain delay is on — automatic watering will skip')}
+        </Badge>
+      )}
       <Grid>
         <Grid.Col span={{ base: 12, md: 7 }}>
           <Stack gap="md">
@@ -591,7 +599,7 @@ export default function DashboardPage({ state, journalTick = 0 }: { state: Engin
                           {!paused && u.willSkip && (
                             <Tooltip label={(u.skipReasons ?? []).join('; ')} multiline maw={320}>
                               <Badge variant="light" color="red" leftSection={<IconAlertTriangle size={12} />}>
-                                {t('will skip')}
+                                {u.skipReasons?.[0] ? `${t('will skip')}: ${u.skipReasons[0]}` : t('will skip')}
                               </Badge>
                             </Tooltip>
                           )}

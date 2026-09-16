@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.24
+
+- **HA rain delay.** Settings → Sensors: point at a Home Assistant boolean
+  (default `input_boolean.irrigation_rain_delay`). When it is ON, automatic
+  schedules, soil and heat triggers skip. Manual Water now still runs.
+  Groups, schedules, and zones can **ignore rain delay** (covered beds /
+  greenhouse). Upcoming waterings show *will skip: HA rain delay…*; the journal
+  records `rain_delay` / `rain_delay_on` / `rain_delay_off`. Turning the
+  boolean on mid-run stops honoring auto zones.
+
 ## 0.4.23
 
 - **Fault lockout clears on confirmed OFF** (including a manual stop). Previously

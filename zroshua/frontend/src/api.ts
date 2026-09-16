@@ -86,6 +86,8 @@ export interface Schedule {
   /** subset of the group's zones this schedule waters; null/undefined = all */
   zoneSelection?: string[] | null;
   conditions?: ScheduleCondition[];
+  /** When true, this schedule still runs while HA rain delay is on. */
+  ignoreRainDelay?: boolean;
   enabled: boolean;
 }
 
@@ -102,6 +104,8 @@ export interface Group {
   enabled: boolean;
   snoozeUntil: number | null;
   orderIndex: number;
+  /** When true, this group's automatic runs ignore the HA rain-delay boolean. */
+  ignoreRainDelay?: boolean;
 }
 
 export interface GroupRule {
@@ -141,6 +145,7 @@ export interface EngineState {
   paused: boolean;
   snoozeUntil: number | null;
   haConnected: boolean;
+  rainDelayActive?: boolean;
   active: {
     zoneId: string;
     zoneName: string;
@@ -208,6 +213,10 @@ export interface Settings {
     dryOutHours: number;
     onWetDuringRun: 'stop_all' | 'stop_linked';
     linkedZones: string[] | null;
+  };
+  rainDelay: {
+    enabled: boolean;
+    entity: string | null;
   };
   weatherTriggers: { enabled: boolean; rainProbPct: number; rainAmountMm: number; freezeC: number | null };
   tempScale: {

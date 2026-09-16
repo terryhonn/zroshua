@@ -81,6 +81,15 @@ export interface Settings {
     onWetDuringRun: 'stop_all' | 'stop_linked';
     linkedZones: string[] | null;
   };
+  /**
+   * Master rain delay from Home Assistant (typically `input_boolean.irrigation_rain_delay`).
+   * When the entity is ON, automatic runs are skipped unless the group/schedule/zone ignores rain delay.
+   * Unavailable / missing entity never blocks watering.
+   */
+  rainDelay: {
+    enabled: boolean;
+    entity: string | null;
+  };
   weatherTriggers: {
     enabled: boolean;
     rainProbPct: number;
@@ -128,6 +137,10 @@ export const defaultSettings: Settings = {
     dryOutHours: 12,
     onWetDuringRun: 'stop_all',
     linkedZones: null,
+  },
+  rainDelay: {
+    enabled: true,
+    entity: 'input_boolean.irrigation_rain_delay',
   },
   weatherTriggers: { enabled: false, rainProbPct: 80, rainAmountMm: 2, freezeC: null },
   tempScale: {
@@ -197,6 +210,7 @@ export class ConfigService {
       quiet: { ...defaultSettings.notifications.quiet, ...(stored.notifications as any)?.quiet },
     };
     merged.tempTriggers = stored.tempTriggers ?? [];
+    merged.rainDelay = { ...defaultSettings.rainDelay, ...(stored.rainDelay ?? {}) };
     return merged;
   }
 

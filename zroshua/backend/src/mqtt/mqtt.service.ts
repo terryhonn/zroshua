@@ -398,6 +398,7 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
               season: schedule.season ?? null,
               zoneDurations: schedule.zoneDurations ?? {},
               zoneSelection: schedule.zoneSelection ?? null,
+              ignoreRainDelay: !!schedule.ignoreRainDelay,
               enabled: schedule.enabled !== false,
             }
           : null,
@@ -410,7 +411,8 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
         zoneDetails: u.zones,
         memberZones,
         willSkip: u.willSkip ?? false,
-        skipReason: u.skipReasons?.[0] ?? null,
+        skipReason: (u.skipReasons ?? []).join('; ') || null,
+        skipReasons: u.skipReasons ?? [],
         maybeSkip: u.maybeSkip?.[0] ?? null,
       };
     });
@@ -472,6 +474,10 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
       paused: snapshot.paused,
       snoozeUntil: snapshot.snoozeUntil,
       haConnected: snapshot.haConnected,
+      rainDelay: {
+        active: this.engine.rainDelayActive(settings),
+        entity: settings.rainDelay?.entity ?? null,
+      },
       /** Display-unit volume for today (L or gal per volumeUnit). */
       litersToday: volUnit === 'gal' ? Math.round(waterToday * 10) / 10 : Math.round(waterToday),
       minutesToday,
