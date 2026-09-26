@@ -198,7 +198,8 @@ energy for N minutes after selected groups finish — e.g. while the barrel refi
 off before Zroshua started it). Use *leave on* / *restore* when the pump also feeds the house
 or water outlets and must not be cut. The pump doubles as a **controller availability check**:
 if it is `unavailable` at start (or within the pre-start window), you get a fault
-notification and the run continues best-effort.
+notification and the run continues best-effort. Pre-start checks are not run, and no
+fault is raised, for a schedule that HA rain delay will skip.
 
 ![Water source: pump behaviour after a run](docs/screenshots/sources-pump.png)
 

@@ -64,6 +64,8 @@ const I = {
   group: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>',
   bucket: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 8h12l-1.2 11.2a2 2 0 0 1-2 1.8H9.2a2 2 0 0 1-2-1.8L6 8zm-1-3h14"/></svg>',
   gear: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2.5M12 20.5V23M4.2 4.2l1.8 1.8M18 18l1.8 1.8M1 12h2.5M20.5 12H23M4.2 19.8l1.8-1.8M18 6l1.8-1.8" stroke-linecap="round"/></svg>',
+  spray:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9.2V5.2"/><path d="M8.3 10 5.6 7"/><path d="M15.7 10 18.4 7"/><path d="M6.2 13.1 3.4 12"/><path d="M17.8 13.1 20.6 12"/><circle cx="12" cy="13.4" r="2.25"/><path d="M12 15.7v3.1"/><path d="M8 21h8"/></svg>',
 };
 const zoneIcon = (type) =>
   type === 'drip' ? I.drop : type === 'beds' ? I.sprout : I.sprinkler;
@@ -740,19 +742,15 @@ class ZroshuaCard extends HTMLElement {
       controllers: (a.controllers || []).length
         ? `<div class="panel">
           <div class="sec top">Controllers</div>
-          <div class="pumps">${(a.controllers || [])
+          <div class="ctrl-row">${(a.controllers || [])
             .map((c) => {
-              const cls =
-                c.status === 'ok' ? 'ok' : c.status === 'degraded' ? 'warn' : c.status === 'offline' ? 'danger' : 'muted';
-              const label =
-                c.status === 'ok'
-                  ? 'online'
-                  : c.status === 'degraded'
-                    ? 'degraded'
-                    : c.status === 'offline'
-                      ? 'offline'
-                      : 'unknown';
-              return this._chip(`${c.name || c.id}: ${label}`, cls);
+              const status =
+                c.status === 'ok' || c.status === 'degraded' || c.status === 'offline' ? c.status : 'unknown';
+              const name = c.name || c.id;
+              return `<div class="ctrl" title="${this._esc(c.detail || name)}">
+                <span class="ctrl-light ${status}">${I.spray}</span>
+                <span class="ctrl-name">${this._esc(name)}</span>
+              </div>`;
             })
             .join('')}</div>
           </div>`
@@ -1299,6 +1297,15 @@ const STYLE = `
     border-radius: 8px; background: color-mix(in srgb, var(--secondary-background-color) 70%, transparent); }
   .pumps { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
   .pumps .chip { margin-left: 0; }
+  .ctrl-row { display: flex; flex-wrap: wrap; gap: 14px 18px; margin-top: 8px; }
+  .ctrl { display: flex; flex-direction: column; align-items: center; gap: 6px; width: 76px; }
+  .ctrl-light { width: 56px; height: 56px; border-radius: 16px; display: flex; align-items: center; justify-content: center; color: #fff; }
+  .ctrl-light svg { width: 26px; height: 26px; }
+  .ctrl-light.ok { background: #c6d94a; }
+  .ctrl-light.offline { background: #e03131; }
+  .ctrl-light.degraded { background: #f0a105; }
+  .ctrl-light.unknown { background: #9a9a9a; }
+  .ctrl-name { font-size: .72rem; line-height: 1.25; text-align: center; overflow-wrap: anywhere; max-width: 84px; }
   .levels { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
   .lvlh { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 2px; }
   .journal { max-height: 280px; overflow: auto; }

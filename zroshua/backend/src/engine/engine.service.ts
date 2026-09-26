@@ -628,8 +628,17 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
     const settings = await this.config.getSettings();
     if (!settings.preStartCheck?.enabled || !this.ha.connected) return;
     const windowMs = Math.max(1, settings.preStartCheck.minutes) * 60_000;
+    const rainDelayOn = this.rainDelayActive(settings);
 
-    const checkZone = async (zone: Zone, occKey: string, startTs: number) => {
+    const checkZone = async (
+      zone: Zone,
+      occKey: string,
+      startTs: number,
+      group: Group | null | undefined,
+      schedule?: Schedule,
+    ) => {
+      // Rain delay will skip this run, so an unavailable entity is not a fault.
+      if (rainDelayOn && this.honorsRainDelay(zone, group, schedule)) return;
       const problems: string[] = [];
       for (const e of zone.entities) if (!this.ha.available(e)) problems.push(e);
       const src = this.source(zone.sourceId);
@@ -655,13 +664,15 @@ export class EngineService implements OnModuleInit, OnModuleDestroy {
       for (const occ of occurrences(group, now, now + windowMs, this.shiftFor('group', group, boost))) {
         const schedule = (group.schedules ?? []).find((s) => s.id === occ.scheduleId);
         for (const zone of this.schedZones(group, schedule)) {
-          await checkZone(zone, occ.key, occ.ts);
+          await checkZone(zone, occ.key, occ.ts, group, schedule);
         }
       }
     }
     for (const zone of this.zones.filter((z) => z.enabled && z.schedules?.length)) {
+      const containing = this.groups.find((g) => g.zoneIds.includes(zone.id)) ?? null;
       for (const occ of occurrences(zone, now, now + windowMs, this.shiftFor('zone', zone, boost))) {
-        await checkZone(zone, `zone:${occ.key}`, occ.ts);
+        const schedule = (zone.schedules ?? []).find((sc) => sc.id === occ.scheduleId);
+        await checkZone(zone, `zone:${occ.key}`, occ.ts, containing, schedule);
       }
     }
     if (this.precheckAlerted.size > 1000) {

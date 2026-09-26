@@ -52,6 +52,8 @@ and applies instantly without restarts.
     also feeds the house or water outlets. The pump is also treated as a controller: if it is
     `unavailable` at start it raises a fault notification and the run continues best-effort
     (the pre-start availability check already flags it ahead of a scheduled start).
+    That pre-start check is skipped, and no fault is raised, when HA rain delay will
+    skip the run.
 - **Group** — an ordered set of zones with schedules. Execution mode: sequential,
   parallel, or parallel with a limit; inter-zone delay; a 0–200 % duration multiplier;
   priority for queue conflicts.
@@ -161,9 +163,9 @@ the run is skipped with a journal reason).
 
 Settings → **Controllers**: name each multi-relay board, optionally an ESPHome **status**
 binary sensor (`platform: status` — on = online), and the switch/valve entities on that
-board. The dashboard and Lovelace **Controllers** section show green / yellow / red chips
-(online / degraded / offline). Status sensor offline or all entities unavailable → red;
-some entities unavailable → yellow; otherwise green.
+board. The dashboard and Lovelace **Controllers** section shows a status light for each
+board, with the controller name under the light. Green is up, red is down, yellow means
+some entities are unavailable, gray means status is unknown. Hover a light for the detail.
 
 ```yaml
 binary_sensor:

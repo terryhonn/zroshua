@@ -66,3 +66,39 @@
 .z-upcoming-row:hover {
   background: color-mix(in srgb, var(--mantine-color-default-hover) 80%, transparent);
 }
+
+/* Controller status lights: name under the box, color is the status. */
+.z-ctrl-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px 18px;
+  align-items: flex-start;
+}
+.z-ctrl {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 76px;
+}
+.z-ctrl-light {
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  flex-shrink: 0;
+}
+.z-ctrl-light.ok { background: #c6d94a; }
+.z-ctrl-light.offline { background: #e03131; }
+.z-ctrl-light.degraded { background: #f0a105; }
+.z-ctrl-light.unknown { background: #9a9a9a; }
+.z-ctrl-name {
+  font-size: 12px;
+  line-height: 1.25;
+  text-align: center;
+  overflow-wrap: anywhere;
+  max-width: 84px;
+}

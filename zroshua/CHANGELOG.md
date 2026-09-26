@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.26
+
+- **No pre-start fault while HA rain delay will skip the run.** A controller that is
+  unavailable no longer raises `precheck_unavailable` for a schedule the rain delay
+  is going to skip. Zones, groups, and schedules set to ignore rain delay are still
+  checked, because those runs still start.
+- **Controller status lights.** Dashboard and Lovelace Controllers panel: a green or
+  red rounded light with a sprinkler icon and the controller name underneath.
+  Yellow is degraded, gray is unknown. The light color is the status; the label
+  is only the name.
+
 ## 0.4.25
 
 - **Toggle HA rain delay from the dashboard.** The rain-delay banner is always

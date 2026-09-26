@@ -793,27 +793,31 @@ export default function DashboardPage({ state, journalTick = 0 }: { state: Engin
                 <Title order={4} mb="sm">
                   {t('Controllers')}
                 </Title>
-                <Group gap="xs" wrap="wrap">
+                <div className="z-ctrl-row">
                   {state!.controllers!.map((c) => {
-                    const color =
-                      c.status === 'ok' ? 'teal' : c.status === 'degraded' ? 'yellow' : c.status === 'offline' ? 'red' : 'gray';
-                    const label =
-                      c.status === 'ok'
-                        ? t('online')
-                        : c.status === 'degraded'
-                          ? t('degraded')
-                          : c.status === 'offline'
-                            ? t('offline')
-                            : t('unknown');
+                    const status =
+                      c.status === 'ok' || c.status === 'degraded' || c.status === 'offline' ? c.status : 'unknown';
                     return (
-                      <Tooltip key={c.id} label={c.detail || label} multiline maw={320}>
-                        <Badge color={color} variant="light" leftSection={<span style={{ fontSize: 10 }}>●</span>}>
-                          {c.name || c.id}: {label}
-                        </Badge>
+                      <Tooltip key={c.id} label={c.detail || c.name || c.id} multiline maw={320}>
+                        <div className="z-ctrl">
+                          <span className={`z-ctrl-light ${status}`} aria-hidden>
+                            <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M12 9.2V5.2" />
+                              <path d="M8.3 10 5.6 7" />
+                              <path d="M15.7 10 18.4 7" />
+                              <path d="M6.2 13.1 3.4 12" />
+                              <path d="M17.8 13.1 20.6 12" />
+                              <circle cx="12" cy="13.4" r="2.25" />
+                              <path d="M12 15.7v3.1" />
+                              <path d="M8 21h8" />
+                            </svg>
+                          </span>
+                          <span className="z-ctrl-name">{c.name || c.id}</span>
+                        </div>
                       </Tooltip>
                     );
                   })}
-                </Group>
+                </div>
               </Card>
             )}
 
