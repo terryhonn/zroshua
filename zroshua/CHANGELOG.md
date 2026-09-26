@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.27
+
+- **Smaller controller lights.** The Lovelace and dashboard status lights are a bit
+  smaller, with tighter spacing, so five controllers sit on one row in a typical
+  card width.
+
 ## 0.4.26
 
 - **No pre-start fault while HA rain delay will skip the run.** A controller that is

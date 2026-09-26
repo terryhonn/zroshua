@@ -1297,15 +1297,15 @@ const STYLE = `
     border-radius: 8px; background: color-mix(in srgb, var(--secondary-background-color) 70%, transparent); }
   .pumps { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
   .pumps .chip { margin-left: 0; }
-  .ctrl-row { display: flex; flex-wrap: wrap; gap: 14px 18px; margin-top: 8px; }
-  .ctrl { display: flex; flex-direction: column; align-items: center; gap: 6px; width: 76px; }
-  .ctrl-light { width: 56px; height: 56px; border-radius: 16px; display: flex; align-items: center; justify-content: center; color: #fff; }
-  .ctrl-light svg { width: 26px; height: 26px; }
+  .ctrl-row { display: flex; flex-wrap: wrap; gap: 8px 8px; margin-top: 8px; }
+  .ctrl { display: flex; flex-direction: column; align-items: center; gap: 4px; width: 64px; min-width: 0; }
+  .ctrl-light { width: 48px; height: 48px; border-radius: 14px; display: flex; align-items: center; justify-content: center; color: #fff; }
+  .ctrl-light svg { width: 22px; height: 22px; }
   .ctrl-light.ok { background: #c6d94a; }
   .ctrl-light.offline { background: #e03131; }
   .ctrl-light.degraded { background: #f0a105; }
   .ctrl-light.unknown { background: #9a9a9a; }
-  .ctrl-name { font-size: .72rem; line-height: 1.25; text-align: center; overflow-wrap: anywhere; max-width: 84px; }
+  .ctrl-name { font-size: .68rem; line-height: 1.2; text-align: center; overflow-wrap: anywhere; max-width: 64px; }
   .levels { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
   .lvlh { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 2px; }
   .journal { max-height: 280px; overflow: auto; }

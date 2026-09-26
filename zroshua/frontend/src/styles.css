@@ -71,20 +71,21 @@
 .z-ctrl-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 14px 18px;
+  gap: 8px 8px;
   align-items: flex-start;
 }
 .z-ctrl {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 6px;
-  width: 76px;
+  gap: 4px;
+  width: 64px;
+  min-width: 0;
 }
 .z-ctrl-light {
-  width: 56px;
-  height: 56px;
-  border-radius: 16px;
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -96,9 +97,9 @@
 .z-ctrl-light.degraded { background: #f0a105; }
 .z-ctrl-light.unknown { background: #9a9a9a; }
 .z-ctrl-name {
-  font-size: 12px;
-  line-height: 1.25;
+  font-size: 11px;
+  line-height: 1.2;
   text-align: center;
   overflow-wrap: anywhere;
-  max-width: 84px;
+  max-width: 64px;
 }

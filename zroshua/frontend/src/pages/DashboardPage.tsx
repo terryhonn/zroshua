@@ -801,7 +801,7 @@ export default function DashboardPage({ state, journalTick = 0 }: { state: Engin
                       <Tooltip key={c.id} label={c.detail || c.name || c.id} multiline maw={320}>
                         <div className="z-ctrl">
                           <span className={`z-ctrl-light ${status}`} aria-hidden>
-                            <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                               <path d="M12 9.2V5.2" />
                               <path d="M8.3 10 5.6 7" />
                               <path d="M15.7 10 18.4 7" />
